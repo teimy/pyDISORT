@@ -1,8 +1,7 @@
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-c RCS version control information:
-c $Header: ErrPack.f,v 2.1 2000/03/27 21:40:49 laszlo Exp $
+c $Rev: 55 $ $Date: 2014-12-31 12:16:59 -0500 (Wed, 31 Dec 2014) $
+c FORTRAN 77
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
       SUBROUTINE  ErrMsg( MESSAG, FATAL )
 
 c        Print out a warning or error message;  abort if error
@@ -38,7 +37,7 @@ c        Print out a warning or error message;  abort if error
       LOGICAL FUNCTION  WrtBad ( VarNam )
 
 c          Write names of erroneous variables and return 'TRUE'
-
+c
 c      INPUT :   VarNam = Name of erroneous variable to be written
 c                         ( CHARACTER, any length )
 
@@ -57,12 +56,14 @@ c                         ( CHARACTER, any length )
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       LOGICAL FUNCTION  WrtDim ( DimNam, MinVal )
 
 c          Write name of too-small symbolic dimension and
 c          the value it should be increased to;  return 'TRUE'
-
+c
 c      INPUT :  DimNam = Name of symbolic dimension which is too small
 c                        ( CHARACTER, any length )
 c               Minval = Value to which that dimension should be
@@ -78,7 +79,9 @@ c                        increased (at least)
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       LOGICAL FUNCTION  TstBad( VarNam, RelErr )
 
 c       Write name (VarNam) of variable failing self-test and its
@@ -95,4 +98,3 @@ c       percent error from the correct value;  return  'FALSE'.
 
       RETURN
       END
-

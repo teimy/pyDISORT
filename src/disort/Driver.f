@@ -108,10 +108,11 @@ CF2PY INTENT(OUT)  :: RFLDIR, RFLDN, FLUP, DFDT, UAVG, UU
 CF2PY INTENT(OUT)  :: ALBMED, TRNMED
       
       INTEGER  MAXCLY, MAXULV, MAXUMU, MAXPHI
-      INTEGER  MAXMOM
+      INTEGER  MAXMOM, MAXCMU
 c$$       PARAMETER ( MAXMOM = 299)
       CHARACTER  HEADER*127
       LOGICAL  LAMBER, PLANK, ONLYFL, PRNT(5), USRANG, USRTAU
+      LOGICAL  DELTAMPLUS, DO_PSEUDO_SPHERE
       INTEGER  IBCND, NMOM, NLYR, NUMU, NSTR, NPHI, NTAU
       REAL     ACCUR, ALBEDO, BTEMP, DTAUC( MAXCLY ), FBEAM, FISOT,
      &         PHI( MAXPHI ), PMOM( 0:MAXMOM, MAXCLY ),
@@ -122,48 +123,82 @@ c$$       PARAMETER ( MAXMOM = 299)
      &         DFDT( MAXULV ), UAVG( MAXULV ),
      &         UU( MAXUMU, MAXULV, MAXPHI ), ALBMED( MAXUMU ),
      &         TRNMED( MAXUMU )
-
+      REAL      EARTH_RADIUS
       INTEGER  IPHAS( MAXCLY )
       REAL     GG( MAXCLY )
+      REAL     H_LYR(0:MAXCLY)
+      REAL     RHOQ(NSTR/2, 0:NSTR/2, 0:(NSTR-1)), 
+     &         RHOU(MAXUMU, 0:NSTR/2, 0:(NSTR-1)), 
+     &         EMUST(MAXUMU), BEMST(NSTR/2), 
+     %         RHO_ACCURATE(MAXUMU, MAXPHI)   
+         
+
 
 c+---------------------------------------------------------------------+
 
       INTEGER  MXTAU, MXMU, MXPHI
-      PARAMETER     ( MXTAU = 5, MXMU = 32, MXPHI = 3 )
+      PARAMETER     ( MXTAU = 5, MXMU = 32, MXPHI = 3)
       INTEGER       LC
       REAL          PI
 
 c+---------------------------------------------------------------------+
 c     .. External Subroutines ..
 
-      EXTERNAL  DISORT, ERRMSG, GETMOM, PRTFIN
+      EXTERNAL  DISORT, ERRMSG, PRTFIN, GETMOM
+
+
 c     ..
 c     .. Intrinsic Functions ..
 
       INTRINSIC ASIN, FLOAT, INDEX
 c     ..
-
-
+      MAXCMU = NSTR
       PI = 2.* ASIN( 1.0 )
+      EARTH_RADIUS = 6400000.
+      DELTAMPLUS = .FALSE.
+      DO_PSEUDO_SPHERE = .FALSE.
+      H_LYR = 0.0
+      RHOQ = 0.0
+      RHOU = 0.0
+      EMUST = 0.0
+      BEMST = 0.0
+      RHO_ACCURATE = 0.0
 
       NLYR = MAXCLY
-      NMOM = NSTR
-      DO LC = 1, NLYR
-         CALL  GETMOM( IPHAS( LC ), GG( LC ), NMOM, PMOM(0,LC) )
+      NMOM = MAXMOM
+      
+      PMOM(: , :) = 0
+
+      DO LC = 1, NLYR   
+            CALL  GETMOM( IPHAS( LC ), GG( LC ), NMOM, PMOM(: , LC) )
       END DO 
       NTAU      = MAXULV
       NPHI      = MAXPHI
       NUMU      = MAXUMU
       HEADER = 'Python wrapper to the DISORT radiative transfer solver'
 
-      CALL  DISORT( NLYR, DTAUC, SSALB, NMOM, PMOM, TEMPER,
-     &                 WVNMLO, WVNMHI, USRTAU, NTAU, UTAU, NSTR,
-     &                 USRANG, NUMU, UMU, NPHI, PHI, IBCND, FBEAM,
-     &                 UMU0, PHI0, FISOT, LAMBER, ALBEDO, BTEMP,
-     &                 TTEMP, TEMIS, PLANK, ONLYFL, ACCUR, PRNT,
-     &                 HEADER, MAXCLY, MAXULV, MAXUMU, MAXPHI,
-     &                 MAXMOM, RFLDIR, RFLDN, FLUP, DFDT, UAVG, UU,
-     &                 ALBMED, TRNMED )
+C      CALL  DISORT( NLYR, DTAUC, SSALB, NMOM, PMOM, TEMPER,
+C     &                 WVNMLO, WVNMHI, USRTAU, NTAU, UTAU, NSTR,
+C     &                 USRANG, NUMU, UMU, NPHI, PHI, IBCND, FBEAM,
+C     &                 UMU0, PHI0, FISOT, LAMBER, ALBEDO, BTEMP,
+C     &                 TTEMP, TEMIS, PLANK, ONLYFL, ACCUR, PRNT,
+C     &                 HEADER, MAXCLY, MAXULV, MAXUMU, MAXPHI,
+C     &                 MAXMOM, RFLDIR, RFLDN, FLUP, DFDT, UAVG, UU,
+C     &                 ALBMED, TRNMED )
 
-      
+      CALL  DISORT( MAXCLY, MAXMOM, MAXCMU, 
+     &                   MAXUMU, MAXPHI, MAXULV,
+     &                   USRANG, USRTAU, IBCND, ONLYFL, PRNT,
+     &                   PLANK, LAMBER, DELTAMPLUS, DO_PSEUDO_SPHERE,
+     &                   DTAUC, SSALB, PMOM, TEMPER, WVNMLO, WVNMHI,
+     &                   UTAU, UMU0, PHI0, UMU, PHI, FBEAM,
+     &                   FISOT, ALBEDO, BTEMP, TTEMP, TEMIS,
+     &                   EARTH_RADIUS, H_LYR, 
+     &                   RHOQ, RHOU, RHO_ACCURATE, BEMST, EMUST,
+     &                   ACCUR,  HEADER,
+     &                   RFLDIR, RFLDN, FLUP, DFDT, UAVG, UU,
+     &                   ALBMED, TRNMED )    
+  
+
+
       END   

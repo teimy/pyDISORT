@@ -1,6 +1,5 @@
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-c RCS version control information:
-c $Header: LINPAK.f,v 2.1 2000/03/27 21:40:49 laszlo Exp $
+c $Rev: 42 $ $Date: 2014-11-07 12:42:45 -0500 (Fri, 07 Nov 2014) $
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 c Call tree:
@@ -32,54 +31,52 @@ c       SAXPY
 c   SSWAP
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
       SUBROUTINE SGBCO( ABD, LDA, N, ML, MU, IPVT, RCOND, Z )
 
 c         Factors a real band matrix by Gaussian elimination
 c         and estimates the condition of the matrix.
-
+c
 c         Revision date:  8/1/82
 c         Author:  Moler, C. B. (U. of New Mexico)
-
+c
 c     If  RCOND  is not needed, SGBFA is slightly faster.
 c     To solve  A*X = B , follow SBGCO by SGBSL.
-
+c
 c     input:
-
+c
 C        ABD     REAL(LDA, N)
 c                contains the matrix in band storage.  The columns
 c                of the matrix are stored in the columns of  ABD  and
 c                the diagonals of the matrix are stored in rows
 c                ML+1 through 2*ML+MU+1 of  ABD .
 c                See the comments below for details.
-
+c
 C        LDA     INTEGER
 c                the leading dimension of the array  ABD .
 c                LDA must be .GE. 2*ML + MU + 1 .
-
+c
 C        N       INTEGER
 c                the order of the original matrix.
-
+c
 C        ML      INTEGER
 c                number of diagonals below the main diagonal.
 c                0 .LE. ML .LT. N .
-
+c
 C        MU      INTEGER
 c                number of diagonals above the main diagonal.
 c                0 .LE. MU .LT. N .
 c                more efficient if  ML .LE. MU .
-
+c
 c     on return
-
-c        ABD     an upper triangular matrix in band storage and
+c
+C        ABD     an upper triangular matrix in band storage and
 c                the multipliers which were used to obtain it.
 c                The factorization can be written  A = L*U  where
 c                L  is a product of permutation and unit lower
-c                triangular matrices and  U  is upper triangular.
-
+c
 C        IPVT    INTEGER(N)
 c                an integer vector of pivot indices.
-
+c
 C        RCOND   REAL
 c                an estimate of the reciprocal condition of  A .
 c                For the system  A*X = B , relative perturbations
@@ -91,18 +88,18 @@ c                is true, then  A  may be singular to working
 c                precision.  In particular,  RCOND  is zero  if
 c                exact singularity is detected or the estimate
 c                underflows.
-
+c
 C        Z       REAL(N)
 c                a work vector whose contents are usually unimportant.
 c                If  A  is close to a singular matrix, then  Z  is
 c                an approximate null vector in the sense that
 c                norm(a*z) = rcond*norm(a)*norm(z) .
-
+c
 c     Band storage
-
+c
 c           If  A  is a band matrix, the following program segment
 c           will set up the input.
-
+c
 c                   ML = (band width below the diagonal)
 c                   MU = (band width above the diagonal)
 c                   M = ML + MU + 1
@@ -114,31 +111,31 @@ c                         K = I - J + M
 c                         ABD(K,J) = A(I,J)
 c                10    CONTINUE
 c                20 CONTINUE
-
+c
 c           This uses rows  ML+1  through  2*ML+MU+1  of  ABD .
 c           In addition, the first  ML  rows in  ABD  are used for
 c           elements generated during the triangularization.
 c           The total number of rows needed in  ABD  is  2*ML+MU+1 .
 c           The  ML+MU by ML+MU  upper left triangle and the
 c           ML by ML  lower right triangle are not referenced.
-
+c
 c     Example:  if the original matrix is
-
+c
 c           11 12 13  0  0  0
 c           21 22 23 24  0  0
 c            0 32 33 34 35  0
 c            0  0 43 44 45 46
 c            0  0  0 54 55 56
 c            0  0  0  0 65 66
-
+c
 c      then  N = 6, ML = 1, MU = 2, LDA .GE. 5  and ABD should contain
-
+c
 c            *  *  *  +  +  +  , * = not used
 c            *  * 13 24 35 46  , + = used for pivoting
 c            * 12 23 34 45 56
 c           11 22 33 44 55 66
 c           21 32 43 54 65  *
-
+c
 c --------------------------------------------------------------------
 
 
@@ -1631,7 +1628,8 @@ c     .. Intrinsic Functions ..
       INTRINSIC ABS
 c     ..
 
-
+      ISAMAX = 0
+      
       IF( N.LE.0 ) THEN
 
          ISAMAX = 0
@@ -1662,5 +1660,5 @@ c     ..
 
       END IF
 
-      END
+      END FUNCTION ISAMAX
 

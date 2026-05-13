@@ -1,15 +1,19 @@
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-c RCS version control information:
-c $Header: DISORT.f,v 2.1 2000/04/04 18:21:55 laszlo Exp $
+c $Rev: 90 $ $Date: 2017-11-30 20:01:24 -0500 (Thu, 30 Nov 2017) $
+c FORTRAN 77
 c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-      SUBROUTINE DISORT( NLYR, DTAUC, SSALB, NMOM, PMOM, TEMPER, WVNMLO,
-     &                   WVNMHI, USRTAU, NTAU, UTAU, NSTR, USRANG, NUMU,
-     &                   UMU, NPHI, PHI, IBCND, FBEAM, UMU0, PHI0,
-     &                   FISOT, LAMBER, ALBEDO, BTEMP, TTEMP, TEMIS,
-     &                   PLANK, ONLYFL, ACCUR, PRNT, HEADER, MAXCLY,
-     &                   MAXULV, MAXUMU, MAXPHI, MAXMOM, RFLDIR, RFLDN,
-     &                   FLUP, DFDT, UAVG, UU, ALBMED, TRNMED )
+      SUBROUTINE DISORT( MAXCLY, MAXMOM, MAXCMU, 
+     &                   MAXUMU, MAXPHI, MAXULV,
+     &                   USRANG, USRTAU, IBCND, ONLYFL, PRNT,
+     &                   PLANK, LAMBER, DELTAMPLUS, DO_PSEUDO_SPHERE,
+     &                   DTAUC, SSALB, PMOM, TEMPER, WVNMLO, WVNMHI,
+     &                   UTAU, UMU0, PHI0, UMU, PHI, FBEAM,
+     &                   FISOT, ALBEDO, BTEMP, TTEMP, TEMIS,
+     &                   EARTH_RADIUS, H_LYR, 
+     &                   RHOQ, RHOU, RHO_ACCURATE, BEMST, EMUST,
+     &                   ACCUR,  HEADER,
+     &                   RFLDIR, RFLDN, FLUP, DFDT, UAVG, UU,
+     &                   ALBMED, TRNMED )    
 
 c *******************************************************************
 c       Plane-parallel discrete ordinates radiative transfer program
@@ -41,21 +45,18 @@ c         |        +-ALTRIN
 c         |        +-SPALTR
 c         |        +-PRALTR
 c         +-PLKAVG-+-(R1MACH)
-c         +-LEPOLY
-c         +-SURFAC-+-QGAUSN-+-(D1MACH)
-c         |        +-BDREF
 c         |        +-ZEROIT
 c         +-SOLEIG-+-ASYMTX-+-(D1MACH)
-c         +-UPBEAM-+-(SGECO)
-c         |        +-(SGESL)
+c         +-UPBEAM-+-(DGETRF) (version 3)
+c         |        +-(DGETRS) (version 3)
 c         +-UPISOT-+-(SGECO)
 c         |        +-(SGESL)
 c         +-TERPEV
 c         +-TERPSO
 c         +-SETMTX-+-ZEROIT
 c         +-SOLVE0-+-ZEROIT
-c         |        +-(SGBCO)
-c         |        +-(SGBSL)
+c         |        +-(SGBTRF)
+c         |        +-(SGBTRS)
 c         +-FLUXES--ZEROIT
 c         +-ZEROIT
 c         +-USRINT
@@ -65,8 +66,9 @@ c         +-ZEROIT
 c         +-RATIO--(R1MACH)
 c         +-INTCOR-+-SINSCA
 c         |        +-SECSCA-+-XIFUNC
-c         +-PRTINT
-c
+c         +-INTCOR_BEAM_REFLEC (version 3)     
+c         +-PRTINT    
+c                   
 c *** Intrinsic Functions used in DISORT package which take
 c     non-negligible amount of time:
 c
@@ -113,7 +115,7 @@ c   APB(IQ/2,IQ/2)    Second matrix factor in reduced eigenvalue problem
 c                     of Eqs. SS(12), STWJ(8E), STWL(23f)
 c                     (used only in SOLEIG)
 c
-c   ARRAY(IQ,IQ)      Scratch matrix for SOLEIG, UPBEAM and UPISOT
+c   ARRAY(IQ,IQ)      Scratch matrix for SOLEIG and UPISOT
 c                     (see each subroutine for definition)
 c
 c   B()               Right-hand side vector of Eq. SC(5) going into
@@ -133,7 +135,7 @@ c   BPLANK            Intensity emitted from bottom boundary
 c
 c   CBAND()           Matrix of left-hand side of the linear system
 c                     Eq. SC(5), scaled by Eq. SC(12);  in banded
-c                     form required by LINPACK solution routines
+c                     form required by LAPACK/LINPACK solution routines
 c
 c   CC(IQ,IQ)         C-sub-IJ in Eq. SS(5)
 c
@@ -179,6 +181,10 @@ c                     the delta-M method is applied. The intensity
 c                     correction of Nakajima and Tanaka is used to
 c                     improve the accuracy of the intensities.
 c
+c  DELTAMPLUS         use new delta-M plus method
+c
+c
+c
 c   DITHER            Small quantity subtracted from single-scattering
 c                     albedos of unity, in order to avoid using special
 c                     case formulas;  prevents an eigenvalue of exactly
@@ -214,7 +220,7 @@ c   GU(IU,IQ,LC)      Eigenvectors interpolated to user polar angles
 c                     ( g  in Eqs. SC(3) and S1(8-9), i.e.
 c                       G without the L factor )
 c
-c   IPVT(LC*IQ)       Integer vector of pivot indices for LINPACK
+c   IPVT(LC*IQ)       Integer vector of pivot indices for LAPACK/LINPACK
 c                     routines
 c
 c   KK(IQ,LC)         Eigenvalues of coeff. matrix in Eq. SS(7)
@@ -299,7 +305,7 @@ c
 c   XR1(LC)           X-sub-one in expansion of thermal source func-
 c                     tion; see  Eqs. SS(14-16); b-sub-one in STWL(24d)
 c
-c   YLM0(L)           Normalized associated Legendre polynomial
+c   YLM0(L,1)         Normalized associated Legendre polynomial
 c                     of subscript L at the beam angle (not saved
 c                     as function of superscipt M)
 c
@@ -342,543 +348,610 @@ c +-------------------------------------------------------------------+
 c
 c  LOCAL SYMBOLIC DIMENSIONS (have big effect on storage requirements):
 c
-c       MXCLY  = Max no. of computational layers
-c       MXULV  = Max no. of output levels
-c       MXCMU  = Max no. of computation polar angles
-c       MXUMU  = Max no. of output polar angles
-c       MXPHI  = Max no. of output azimuthal angles
-c       MXSQT  = Max no. of square roots of integers (for LEPOLY)
+c       MAXCLY  = Max no. of computational layers
+c       MAXULV  = Max no. of output levels
+c       MAXCMU  = Max no. of computation polar angles
+c       MAXUMU  = Max no. of output polar angles
+c       MAXPHI  = Max no. of output azimuthal angles
+c       MAXSQT  = Max no. of square roots of integers (for LEPOLY)
 c +-------------------------------------------------------------------+
 
-c     .. Parameters ..
-
-      INTEGER   MXCLY, MXULV, MXCMU, MXUMU, MXPHI, MI, MI9M2, NNLYRI,
-     &          MXSQT
-      PARAMETER ( MXCLY = 50, MXULV = 50, MXCMU = 48, MXUMU = 10,
-     &          MXPHI = 3, MI = MXCMU / 2, MI9M2 = 9*MI - 2,
-     &          NNLYRI = MXCMU*MXCLY, MXSQT = 1000 )
+!      USE PARAMETERS 
+      INTEGER   MAXCLY, MAXMOM, MAXPHI, MAXULV, MAXUMU, MAXCMU
 c     ..
 c     .. Scalar Arguments ..
-
       CHARACTER HEADER*127
       LOGICAL   LAMBER, ONLYFL, PLANK, USRANG, USRTAU
-      INTEGER   IBCND, MAXCLY, MAXMOM, MAXPHI, MAXULV, MAXUMU, NLYR,
-     &          NMOM, NPHI, NSTR, NTAU, NUMU
+      INTEGER   IBCND, NLYR, NMOM, NPHI, NSTR, NTAU, NUMU
       REAL      ACCUR, ALBEDO, BTEMP, FBEAM, FISOT, PHI0, TEMIS, TTEMP,
      &          UMU0, WVNMHI, WVNMLO
+
 c     ..
 c     .. Array Arguments ..
-
       LOGICAL   PRNT( 5 )
       REAL      ALBMED( MAXUMU ), DFDT( MAXULV ), DTAUC( MAXCLY ),
-     &          FLUP( MAXULV ), PHI( MAXPHI ), PMOM( 0:MAXMOM, MAXCLY ),
+     &          FLUP( MAXULV ), PHI( MAXPHI ), 
+     &          PMOM( 0:MAXMOM, MAXCLY ),
      &          RFLDIR( MAXULV ), RFLDN( MAXULV ), SSALB( MAXCLY ),
      &          TEMPER( 0:MAXCLY ), TRNMED( MAXUMU ), UAVG( MAXULV ),
      &          UMU( MAXUMU ), UTAU( MAXULV ),
      &          UU( MAXUMU, MAXULV, MAXPHI )
+
 c     ..
 c     .. Local Scalars ..
-
-      LOGICAL   COMPAR, CORINT, DELTAM, LYRCUT, PASS1
-      LOGICAL   VERBOSE
+      LOGICAL   COMPAR, CORINT, DELTAM, LYRCUT, PASS1 
       INTEGER   IQ, IU, J, KCONV, L, LC, LEV, LU, MAZIM, NAZ, NCOL,
-     &          NCOS, NCUT, NN, NS
+     &          NCOS, NCUT, NN
       REAL      ANGCOS, AZERR, AZTERM, BPLANK, COSPHI, DELM0, DITHER,
      &          DUM, PI, RPD, SGN, TPLANK
+
 c     ..
 c     .. Local Arrays ..
-
       LOGICAL   PRNTU0( 2 )
-      INTEGER   IPVT( NNLYRI ), LAYRU( MXULV )
+      INTEGER   IPVT(MAXCMU*MAXCLY ), LAYRU( MAXULV )
+      REAL      AMB(MAXCMU/2,MAXCMU/2), APB(MAXCMU/2,MAXCMU/2), 
+     &          ARRAY(MAXCMU,MAXCMU),
+     &          B( MAXCMU*MAXCLY ), BDR(MAXCMU/2,0:MAXCMU/2), 
+     &          BEM(MAXCMU/2),
+     &          CBAND( 9*(MAXCMU/2)-2, MAXCMU*MAXCLY ), 
+     &          CC(MAXCMU, MAXCMU),
+     &          CMU( MAXCMU), CWT( MAXCMU ), DTAUCP( MAXCLY ),
+     &          EMU( MAXUMU ), EVAL( MAXCMU/2 ), EVECC(MAXCMU, MAXCMU),
+     &          EXPBEA( 0:MAXCLY ), FLDIR( MAXULV), FLDN( MAXULV),
+     &          FLYR( MAXCLY ), GC( MAXCMU, MAXCMU, MAXCLY ),
+     &          GL( 0:MAXCMU, MAXCLY ), GU( MAXUMU, MAXCMU, MAXCLY ),
+     &          KK(MAXCMU, MAXCLY), LL(MAXCMU, MAXCLY), OPRIM( MAXCLY),
+     &          PHASA( MAXCLY ), PHAST( MAXCLY ), PHASM( MAXCLY ),
+     &          PHIRAD( MAXPHI ), PKAG( 0:MAXCLY ), PSI0( MAXCMU ),
+     &          PSI1( MAXCMU ), RMU( MAXUMU, 0:MAXCMU/2 ), 
+     &          SQT(2*MAXCMU),
+     &          TAUC( 0:MAXCLY), TAUCPR( 0:MAXCLY), 
+     &          U0C(MAXCMU, MAXULV),
+     &          U0U( MAXUMU, MAXULV ), UTAUPR( MAXULV ),
+     &          UUM( MAXUMU, MAXULV ), WK( MAXCMU ), XR0( MAXCLY ),
+     &          XR1( MAXCLY ), YLM0( 0:MAXCMU,1), 
+     &          YLMC(0:MAXCMU,MAXCMU),
+     &          YLMU( 0:MAXCMU, MAXUMU ), Z(MAXCMU*MAXCLY), 
+     &          Z0( MAXCMU ),
+     &          Z0U(MAXUMU, MAXCLY), Z1(MAXCMU), Z1U(MAXUMU, MAXCLY),
+     &          ZBEAM( MAXUMU, MAXCLY )
+      REAL      ZJ( MAXCMU), ZPLK0( MAXCMU, MAXCLY),
+     &          ZPLK1( MAXCMU, MAXCLY ), ZZ( MAXCMU, MAXCLY )
+      DOUBLE PRECISION AAD(MAXCMU/2,MAXCMU/2), EVALD(MAXCMU/2), 
+     &          EVECCD(MAXCMU/2,MAXCMU/2), WKD( MAXCMU )
 
-      REAL      AMB( MI, MI ), APB( MI, MI ), ARRAY( MXCMU, MXCMU ),
-     &          B( NNLYRI ), BDR( MI, 0:MI ), BEM( MI ),
-     &          CBAND( MI9M2, NNLYRI ), CC( MXCMU, MXCMU ),
-     &          CMU( MXCMU ), CWT( MXCMU ), DTAUCP( MXCLY ),
-     &          EMU( MXUMU ), EVAL( MI ), EVECC( MXCMU, MXCMU ),
-     &          EXPBEA( 0:MXCLY ), FLDIR( MXULV ), FLDN( MXULV ),
-     &          FLYR( MXCLY ), GC( MXCMU, MXCMU, MXCLY ),
-     &          GL( 0:MXCMU, MXCLY ), GU( MXUMU, MXCMU, MXCLY ),
-     &          KK( MXCMU, MXCLY ), LL( MXCMU, MXCLY ), OPRIM( MXCLY ),
-     &          PHASA( MXCLY ), PHAST( MXCLY ), PHASM( MXCLY ),
-     &          PHIRAD( MXPHI ), PKAG( 0:MXCLY ), PSI0( MXCMU ),
-     &          PSI1( MXCMU ), RMU( MXUMU, 0:MI ), SQT( MXSQT ),
-     &          TAUC( 0:MXCLY ), TAUCPR( 0:MXCLY ), U0C( MXCMU, MXULV ),
-     &          U0U( MXUMU, MXULV ), UTAUPR( MXULV ),
-     &          UUM( MXUMU, MXULV ), WK( MXCMU ), XR0( MXCLY ),
-     &          XR1( MXCLY ), YLM0( 0:MXCMU ), YLMC( 0:MXCMU, MXCMU ),
-     &          YLMU( 0:MXCMU, MXUMU ), Z( NNLYRI ), Z0( MXCMU ),
-     &          Z0U( MXUMU, MXCLY ), Z1( MXCMU ), Z1U( MXUMU, MXCLY ),
-     &          ZBEAM( MXUMU, MXCLY )
-      REAL      ZJ( MXCMU ), ZPLK0( MXCMU, MXCLY ),
-     &          ZPLK1( MXCMU, MXCLY ), ZZ( MXCMU, MXCLY )
+c     ..
+c     .. Version 3 .. 
+      REAL      RHOQ(MAXCMU/2, 0:MAXCMU/2, 0:(MAXCMU-1)), 
+     &          RHOU(MAXUMU,   0:MAXCMU/2, 0:(MAXCMU-1)),
+     &          EMUST(MAXUMU), BEMST(MAXCMU/2)
+      REAL      UMU0DI, UMU0SQ, DENOM
+      REAL      RHO_ACCURATE(MAXUMU,MAXPHI)  
+      REAL      EIGEN_MAT(MAXCMU/2, MAXCMU/2 )  
 
-      DOUBLE PRECISION AAD( MI, MI ), EVALD( MI ), EVECCD( MI, MI ),
-     &                 WKD( MXCMU )
+c     .. Version 3: spherical correction ..
+      REAL      EARTH_RADIUS, H_LYR(0:MAXCLY)
+      REAL      UMU0L(MAXCLY)
+      LOGICAL   DO_PSEUDO_SPHERE
+
+c     .. Version 3: deltam plus
+      LOGICAL   DELTAMPLUS
 c     ..
 c     .. External Functions ..
-
       REAL      PLKAVG, R1MACH, RATIO
       EXTERNAL  PLKAVG, R1MACH, RATIO
+
 c     ..
 c     .. External Subroutines ..
-
       EXTERNAL  ALBTRN, CHEKIN, CMPINT, FLUXES, INTCOR, LEPOLY, PRAVIN,
      &          PRTINP, PRTINT, SETDIS, SETMTX, SLFTST, SOLEIG, SOLVE0,
      &          SURFAC, TERPEV, TERPSO, UPBEAM, UPISOT, USRINT, ZEROAL,
      &          ZEROIT
+
 c     ..
 c     .. Intrinsic Functions ..
-
       INTRINSIC ABS, ASIN, COS, FLOAT, LEN, MAX, SQRT
+
 c     ..
-      SAVE      DITHER, PASS1, PI, RPD, SQT
+c     .. SAVE and DATA Statements ..
+      SAVE      DITHER, PASS1, PI, RPD
       DATA      PASS1 / .TRUE. /, PRNTU0 / 2*.FALSE. /
-      DATA      VERBOSE / .FALSE. /
 
-      DELTAM = .TRUE.
-      CORINT = .TRUE.
+      NLYR = MAXCLY
+      NMOM = MAXMOM
+      NSTR = MAXCMU
+      NUMU = MAXUMU
+      NPHI = MAXPHI
+      NTAU = MAXULV
 
-
-      IF( PASS1 ) THEN
-
-         PI     = 2.*ASIN( 1.0 )
-         DITHER = 10.*R1MACH( 4 )
-
-c                            ** Must dither more on high (14-digit)
-c                            ** precision machine
-
-         IF( DITHER.LT.1.E-10 ) DITHER = 10.*DITHER
-
-         RPD  = PI / 180.0
-
-         DO 10 NS = 1, MXSQT
-            SQT( NS ) = SQRT( FLOAT( NS ) )
-   10    CONTINUE
-c                            ** Set input values for self-test.
-c                            ** Be sure SLFTST sets all print flags off.
-         COMPAR = .FALSE.
-
-         CALL SLFTST( CORINT, ACCUR, ALBEDO, BTEMP, DELTAM, DTAUC( 1 ),
-     &                FBEAM, FISOT, IBCND, LAMBER, NLYR, PLANK, NPHI,
-     &                NUMU, NSTR, NTAU, ONLYFL, PHI( 1 ), PHI0, NMOM,
-     &                PMOM( 0,1 ), PRNT, PRNTU0, SSALB( 1 ), TEMIS,
-     &                TEMPER( 0 ), TTEMP, UMU( 1 ), USRANG, USRTAU,
-     &                UTAU( 1 ), UMU0, WVNMHI, WVNMLO, COMPAR, DUM,
-     &                DUM, DUM, DUM )
-
+      IF( DELTAMPLUS .AND. ( NMOM .LT. NSTR + 1 ) ) THEN
+         CALL ERRMSG( 'To use DeltaM+, NMOM must be  '//
+     &                'at least equal to NSTR + 1, '//
+     &                ' increase NMOM. ',
+     &                 .True.)
+      ENDIF 
+      
+      IF (DELTAMPLUS) THEN
+        DELTAM = .FALSE.
+        CORINT = .FALSE.
+      ELSE
+        DELTAM = .TRUE.
+        CORINT = .TRUE.
       END IF
 
+      IF (DELTAMPLUS) THEN 
+        DO L = 1, NLYR 
+        
+           IF ( PMOM(NSTR,L) .LT. 1.0e-4 ) THEN
+             DELTAMPLUS = .FALSE.
+             DELTAM     = .TRUE.
+             CORINT = .TRUE.
+           ENDIF
+         
+           IF ( PMOM(NSTR+1,L) .LT. PMOM(NSTR,L)*0.7 ) THEN
+             DELTAMPLUS = .FALSE.
+             DELTAM     = .TRUE.
+             CORINT = .TRUE.
+           ENDIF
+           
+        ENDDO
+      ENDIF
+      
+C      CORINT = .TRUE.
+      
+C      DELTAM = .FALSE.
+C      DELTAMPLUS = .FALSE.
+C      CORINT = .FALSE.
+
+c     ** Disable these at your own risk
+c      DELTAM = .FALSE.
+c      CORINT = .FALSE.
+
+c     ** For debugging purposes only
+c      PASS1 = .FALSE.
+
+      IF( IBCND.EQ.1 .AND. ONLYFL ) THEN 
+         CALL ERRMSG( 'ONLYFL must be .FALSE. for  '//
+     &                'IBCND = 1 shortcut. '//
+     &                'Please see DISORT.txt file'//
+     &                ' for more details about this option.',
+     &                 .True.)
+      ENDIF
+      
+      IF( PASS1 ) THEN
+
+        PI     = 2.*ASIN( 1.0 )
+        DITHER = 10.*R1MACH( 4 )
+
+c       ** Must dither more on high (>= 14-digit) precision machine
+        IF( DITHER.LT.1.E-10 ) THEN
+          DITHER = 10.*DITHER
+        ENDIF
+
+        RPD  = PI / 180.0
+
+
+c       ** Set input values for self-test
+c       ** Ensure that SLFTST sets all print flags off
+        COMPAR = .FALSE.
+
+        CALL SLFTST( CORINT, ACCUR, ALBEDO, BTEMP, DELTAM, DTAUC( 1 ),
+     &               FBEAM, FISOT, IBCND, LAMBER, NLYR, PLANK, NPHI,
+     &               NUMU, NSTR, NTAU, ONLYFL, PHI( 1 ), PHI0, NMOM,
+     &               PMOM( 0,1 ), PRNT, PRNTU0, SSALB( 1 ), TEMIS,
+     &               TEMPER( 0 ), TTEMP, UMU( 1 ), USRANG, USRTAU,
+     &               UTAU( 1 ), UMU0, WVNMHI, WVNMLO, COMPAR, DUM,
+     &               DUM, DUM, DUM, DO_PSEUDO_SPHERE, DELTAMPLUS )
+
+      ENDIF
 
    20 CONTINUE
 
-      IF( .NOT.PASS1 .AND. LEN( HEADER ).NE.0 .AND. VERBOSE )
-     &    WRITE( *,'(//,1X,100(''*''),/,A,/,1X,100(''*''))' )
-     &    ' DISORT: '//HEADER
+c      IF( .NOT.PASS1 .AND. LEN( HEADER ).NE.0 ) THEN
+c         WRITE( *,'(//,1X,100(''*''),/,A,/,1X,100(''*''))' )
+c     &    ' DISORT: '//HEADER
+c      ENDIF
 
-c                                  ** Calculate cumulative optical depth
-c                                  ** and dither single-scatter albedo
-c                                  ** to improve numerical behavior of
-c                                  ** eigenvalue/vector computation
-      CALL ZEROIT( TAUC, MXCLY + 1 )
-
+c     ** Calculate cumulative optical depth and dither single-scatter albedo
+c     ** to improve numerical behavior of eigenvalue/vector computation.
+      CALL ZEROIT( TAUC, MAXCLY + 1 )
       DO 30 LC = 1, NLYR
+        IF( SSALB( LC ).EQ.1.0 ) THEN
+          SSALB( LC ) = 1.0 - DITHER
+        ENDIF
 
-         IF( SSALB( LC ).EQ.1.0 ) SSALB( LC ) = 1.0 - DITHER
-         TAUC( LC ) = TAUC( LC - 1 ) + DTAUC( LC )
-
+        TAUC( LC ) = TAUC( LC - 1 ) + DTAUC( LC )
    30 CONTINUE
-c                                ** Check input dimensions and variables
 
+c     ** Check input dimensions and variables
       CALL CHEKIN( NLYR, DTAUC, SSALB, NMOM, PMOM, TEMPER, WVNMLO,
      &             WVNMHI, USRTAU, NTAU, UTAU, NSTR, USRANG,
      &             NUMU, UMU, NPHI, PHI, IBCND, FBEAM, UMU0,
      &             PHI0, FISOT, LAMBER, ALBEDO, BTEMP, TTEMP,
      &             TEMIS, PLANK, ONLYFL, DELTAM, CORINT, ACCUR,
      &             TAUC, MAXCLY, MAXULV, MAXUMU, MAXPHI, MAXMOM,
-     &             MXCLY, MXULV, MXUMU, MXCMU, MXPHI, MXSQT )
+     &             MAXCMU )
 
-c                                 ** Zero internal and output arrays
-
-      CALL  ZEROAL( MXCLY, EXPBEA(1), FLYR, OPRIM, PHASA, PHAST, PHASM,
+c     ** Zero internal and output arrays
+      CALL  ZEROAL( MAXCLY, EXPBEA(1), FLYR, OPRIM, PHASA, PHAST, PHASM,
      &                     TAUCPR(1), XR0, XR1,
-     &              MXCMU, CMU, CWT, PSI0, PSI1, WK, Z0, Z1, ZJ,
-     &              MXCMU+1, YLM0,
-     &              MXCMU**2, ARRAY, CC, EVECC,
-     &              (MXCMU+1)*MXCLY, GL,
-     &              (MXCMU+1)*MXCMU, YLMC,
-     &              (MXCMU+1)*MXUMU, YLMU,
-     &              MXCMU*MXCLY, KK, LL, ZZ, ZPLK0, ZPLK1,
-     &              MXCMU**2*MXCLY, GC,
-     &              MXULV, LAYRU, UTAUPR,
-     &              MXUMU*MXCMU*MXCLY, GU,
-     &              MXUMU*MXCLY, Z0U, Z1U, ZBEAM,
-     &              MI, EVAL,
-     &              MI**2, AMB, APB,
-     &              NNLYRI, IPVT, Z,
+     &              MAXCMU, CMU, CWT, PSI0, PSI1, WK, Z0, Z1, ZJ,
+     &              MAXCMU+1, YLM0,
+     &              NSTR**2, ARRAY, CC, EVECC,
+     &              (NSTR+1)*NLYR, GL,
+     &              (MAXCMU+1)*MAXCMU, YLMC,
+     &              (MAXCMU+1)*MAXUMU, YLMU,
+     &              MAXCMU*MAXCLY, KK, LL, ZZ, ZPLK0, ZPLK1,
+     &              MAXCMU**2*MAXCLY, GC,
+     &              MAXULV, LAYRU, UTAUPR,
+     &              MAXUMU*MAXCMU*MAXCLY, GU,
+     &              MAXUMU*MAXCLY, Z0U, Z1U, ZBEAM,
+     &              NSTR/2, EVAL,
+     &              (NSTR/2)**2, AMB, APB,
+     &              NSTR*NLYR, IPVT, Z,
      &              MAXULV, RFLDIR, RFLDN, FLUP, UAVG, DFDT,
      &              MAXUMU, ALBMED, TRNMED,
-     &              MXUMU*MXULV, U0U,
+     &              MAXUMU*MAXULV, U0U,
      &              MAXUMU*MAXULV*MAXPHI, UU )
 
-c                                 ** Perform various setup operations
-
+c     ** Perform various setup operations
       CALL SETDIS( CMU, CWT, DELTAM, DTAUC, DTAUCP, EXPBEA, FBEAM, FLYR,
-     &             GL, IBCND, LAYRU, LYRCUT, MAXMOM, MAXUMU, MXCMU,
+     &             GL, IBCND, LAYRU, LYRCUT, MAXMOM, MAXUMU, MAXCMU,
      &             NCUT, NLYR, NTAU, NN, NSTR, PLANK, NUMU, ONLYFL,
      &             CORINT, OPRIM, PMOM, SSALB, TAUC, TAUCPR, UTAU,
-     &             UTAUPR, UMU, UMU0, USRTAU, USRANG )
+     &             UTAUPR, UMU, UMU0, USRTAU, USRANG, NAZZ, MI, SQT,
+     &             DO_PSEUDO_SPHERE, EARTH_RADIUS, H_LYR, UMU0L,
+     &             DELTAMPLUS )
 
-c                                 ** Print input information
-      IF( PRNT( 1 ) )
-     &    CALL PRTINP( NLYR, DTAUC, DTAUCP, SSALB, NMOM, PMOM, TEMPER,
-     &                 WVNMLO, WVNMHI, NTAU, UTAU, NSTR, NUMU, UMU,
-     &                 NPHI, PHI, IBCND, FBEAM, UMU0, PHI0, FISOT,
-     &                 LAMBER, ALBEDO, BTEMP, TTEMP, TEMIS, DELTAM,
-     &                 PLANK, ONLYFL, CORINT, ACCUR, FLYR, LYRCUT,
-     &                 OPRIM, TAUC, TAUCPR, MAXMOM, PRNT( 5 ) )
+c     ** Print input information
+      IF( PRNT( 1 ) ) THEN
+        CALL PRTINP( NLYR, DTAUC, DTAUCP, SSALB, NMOM, PMOM, TEMPER,
+     &               WVNMLO, WVNMHI, NTAU, UTAU, NSTR, NUMU, UMU,
+     &               NPHI, PHI, IBCND, FBEAM, UMU0, PHI0, FISOT,
+     &               LAMBER, ALBEDO, BTEMP, TTEMP, TEMIS, DELTAM,
+     &               PLANK, ONLYFL, CORINT, ACCUR, FLYR, LYRCUT,
+     &               OPRIM, TAUC, TAUCPR, MAXMOM, PRNT( 5 ),
+     &               DO_PSEUDO_SPHERE, H_LYR, DELTAMPLUS)
+      ENDIF
 
-c                              ** Handle special case for getting albedo
-c                              ** and transmissivity of medium for many
-c                              ** beam angles at once
+c     ** Handle special case for getting albedo and transmissivity of medium for
+c     ** many beam angles at once.
       IF( IBCND.EQ.1 ) THEN
-
-         CALL ALBTRN( ALBEDO, AMB, APB, ARRAY, B, BDR, CBAND, CC, CMU,
-     &                CWT, DTAUCP, EVAL, EVECC, GL, GC, GU, IPVT, KK,
+        CALL ALBTRN( ALBEDO, AMB, APB, ARRAY, B, BDR, CBAND, 
+     &                CC, CMU, CWT, DTAUCP, EVAL, EVECC, 
+     &                GL, GC, GU, IPVT, KK,
      &                LL, NLYR, NN, NSTR, NUMU, PRNT, TAUCPR, UMU, U0U,
-     &                WK, YLMC, YLMU, Z, AAD, EVALD, EVECCD, WKD, MI,
-     &                MI9M2, MAXUMU, MXCMU, MXUMU, NNLYRI, SQT, ALBMED,
+     &                WK, YLMC, YLMU, Z, AAD, EVALD, EVECCD, WKD,
+     &                MAXUMU, MAXCMU,MAXUMU, SQT, ALBMED,
      &                TRNMED )
-         RETURN
+        RETURN
+      ENDIF
 
-      END IF
-c                                   ** Calculate Planck functions
+c     ** Calculate Planck functions
       IF( .NOT.PLANK ) THEN
-
-         BPLANK = 0.0
-         TPLANK = 0.0
-         CALL ZEROIT( PKAG,  MXCLY + 1 )
-
+        BPLANK = 0.0
+        TPLANK = 0.0
+        CALL ZEROIT( PKAG,  MAXCLY + 1 )
       ELSE
-
-         TPLANK = TEMIS*PLKAVG( WVNMLO, WVNMHI, TTEMP )
-         BPLANK =       PLKAVG( WVNMLO, WVNMHI, BTEMP )
-
-         DO 40 LEV = 0, NLYR
-            PKAG( LEV ) = PLKAVG( WVNMLO, WVNMHI, TEMPER( LEV ) )
-   40    CONTINUE
-
-      END IF
-
+        TPLANK = TEMIS*PLKAVG( WVNMLO, WVNMHI, TTEMP )
+        BPLANK =       PLKAVG( WVNMLO, WVNMHI, BTEMP )
+        DO 40 LEV = 0, NLYR
+          PKAG( LEV ) = PLKAVG( WVNMLO, WVNMHI, TEMPER( LEV ) )
+   40   CONTINUE
+      ENDIF
 
 c ========  BEGIN LOOP TO SUM AZIMUTHAL COMPONENTS OF INTENSITY  =======
 c           (EQ STWJ 5, STWL 6)
 
       KCONV  = 0
       NAZ    = NSTR - 1
-c                                    ** Azimuth-independent case
 
+c     ** Azimuth-independent case
       IF( FBEAM.EQ.0.0 .OR. ABS(1.-UMU0).LT.1.E-5 .OR. ONLYFL .OR.
      &   ( NUMU.EQ.1 .AND. ABS(1.-UMU(1)).LT.1.E-5 ) .OR.
      &   ( NUMU.EQ.1 .AND. ABS(1.+UMU(1)).LT.1.E-5 ) .OR.
      &   ( NUMU.EQ.2 .AND. ABS(1.+UMU(1)).LT.1.E-5 .AND.
-     &     ABS(1.-UMU(2)).LT.1.E-5 ) )
-     &   NAZ = 0
+     &     ABS(1.-UMU(NUMU)).LT.1.E-5 ) ) THEN 
+!     &     ABS(1.-UMU(2)).LT.1.E-5 ) ) THEN
+        NAZ = 0
+      ENDIF
 
 
       DO 180 MAZIM = 0, NAZ
 
-         IF( MAZIM.EQ.0 ) DELM0  = 1.0
-         IF( MAZIM.GT.0 ) DELM0  = 0.0
+        IF( MAZIM.GT.0 ) THEN
+          DELM0  = 0.0
+        ELSEIF( MAZIM.EQ.0 ) THEN
+          DELM0  = 1.0
+        ENDIF
 
-c                             ** Get normalized associated Legendre
-c                             ** polynomials for
-c                             ** (a) incident beam angle cosine
-c                             ** (b) computational and user polar angle
-c                             **     cosines
-         IF( FBEAM.GT.0.0 ) THEN
+c       ** Get normalized associated Legendre polynomials for
+c       ** (a) incident beam angle cosine
+c       ** (b) computational and user polar angle cosines
 
-            NCOS   = 1
-            ANGCOS = -UMU0
+        IF( FBEAM.GT.0.0 ) THEN
+          NCOS   = 1
+          ANGCOS = -UMU0
+          !CALL LEPOLY( NCOS, MAZIM, MAXCMU, NSTR-1, ANGCOS, SQT, YLM0 )
+          CALL LEPOLY0( MAZIM, MAXCMU, NSTR-1, ANGCOS, SQT, YLM0 )
 
-            CALL LEPOLY( NCOS, MAZIM, MXCMU, NSTR-1, ANGCOS, SQT, YLM0 )
-
-         END IF
+        ENDIF
 
 
-         IF( .NOT.ONLYFL .AND. USRANG )
-     &       CALL LEPOLY( NUMU, MAZIM, MXCMU, NSTR-1, UMU, SQT, YLMU )
+        IF( .NOT.ONLYFL .AND. USRANG ) THEN
+          CALL LEPOLY( NUMU, MAZIM, MAXCMU, NSTR-1, UMU, SQT, YLMU )
+        ENDIF
 
-         CALL LEPOLY( NN, MAZIM, MXCMU, NSTR-1, CMU, SQT, YLMC )
+        CALL LEPOLY( NN, MAZIM, MAXCMU, NSTR-1, CMU, SQT, YLMC )
 
-c                       ** Get normalized associated Legendre polys.
-c                       ** with negative arguments from those with
-c                       ** positive arguments; Dave/Armstrong Eq. (15),
-c                       ** STWL(59)
-         SGN  = -1.0
+c       ** Get normalized associated Legendre polys.  with negative arguments
+c       ** from those with positive arguments; Dave/Armstrong Eq. (15),
+c       ** STWL(59).
+        SGN  = -1.0
+        DO 70 L = MAZIM, NSTR - 1
+          SGN  = -SGN
+          DO 60 IQ = NN + 1, NSTR
+            YLMC( L, IQ ) = SGN*YLMC( L, IQ - NN )
+   60     CONTINUE
 
-         DO 70 L = MAZIM, NSTR - 1
+   70   CONTINUE
 
-            SGN  = -SGN
-
-            DO 60 IQ = NN + 1, NSTR
-               YLMC( L, IQ ) = SGN*YLMC( L, IQ - NN )
-   60       CONTINUE
-
-   70    CONTINUE
-c                                 ** Specify users bottom reflectivity
-c                                 ** and emissivity properties
-         IF( .NOT.LYRCUT )
-     &       CALL SURFAC( ALBEDO, DELM0, CMU, FBEAM, LAMBER, MI, MAZIM,
-     &                    MXUMU, NN, NUMU, ONLYFL, PI, UMU, UMU0,
-     &                    USRANG, WVNMLO, WVNMHI, BDR, EMU, BEM, RMU )
+c       ** Specify users bottom reflectivity and emissivity properties
+        IF( .NOT.LYRCUT ) THEN
+          CALL SURFAC( ALBEDO, FBEAM, LAMBER, MAXCMU/2, MAZIM,
+     &                 MAXUMU, NN, NUMU, ONLYFL, UMU, 
+     &                 USRANG, BDR, EMU, BEM, RMU,
+     &                 RHOQ, RHOU, EMUST, BEMST, NAZZ )
+        ENDIF
 
 
 c ===================  BEGIN LOOP ON COMPUTATIONAL LAYERS  =============
+        DO 80 LC = 1, NCUT
 
-         DO 80 LC = 1, NCUT
-
-c                      ** Solve eigenfunction problem in Eq. STWJ(8B),
-c                      ** STWL(23f); return eigenvalues and eigenvectors
-
-            CALL SOLEIG( AMB, APB, ARRAY, CMU, CWT, GL( 0,LC ), MI,
-     &                   MAZIM, MXCMU, NN, NSTR, YLMC, CC, EVECC, EVAL,
-     &                   KK( 1,LC ), GC( 1,1,LC ), AAD, EVECCD, EVALD,
-     &                   WKD )
-
-c                                  ** Calculate particular solutions of
-c                                  ** Eq. SS(18), STWL(24a) for incident
-c                                  ** beam source
-            IF( FBEAM.GT.0.0 )
-     &          CALL UPBEAM( ARRAY, CC, CMU, DELM0, FBEAM, GL( 0,LC ),
-     &                       IPVT, MAZIM, MXCMU, NN, NSTR, PI, UMU0, WK,
-     &                       YLM0, YLMC, ZJ, ZZ( 1,LC ) )
-
-c                              ** Calculate particular solutions of Eq.
-c                              ** SS(15), STWL(25) for thermal emission
-c                              ** source
-c
-            IF( PLANK .AND. MAZIM.EQ.0 ) THEN
-
-               XR1( LC ) = 0.0
-
-               IF( DTAUCP( LC ).GT.0.0 ) XR1( LC ) =
-     &             ( PKAG( LC ) - PKAG( LC-1 ) ) / DTAUCP( LC )
-
-               XR0( LC ) = PKAG( LC-1 ) - XR1( LC )*TAUCPR( LC-1 )
-
-               CALL UPISOT( ARRAY, CC, CMU, IPVT, MXCMU, NN, NSTR,
-     &                      OPRIM( LC ), WK, XR0( LC ), XR1( LC ),
-     &                      Z0, Z1, ZPLK0( 1,LC ), ZPLK1( 1,LC ) )
-            END IF
+c         ** Solve eigenfunction problem in Eq. STWJ(8B), STWL(23f); return
+c         ** eigenvalues and eigenvectors
+c         ** Version 3: update SOLEIG argument: EIGEN_MAT
+          CALL SOLEIG( AMB, APB, EIGEN_MAT, CMU, CWT, GL( 0,LC ), 
+     &                 MAZIM, MAXCMU, NN, NSTR,YLMC,CC, EVECC, EVAL,
+     &                 KK( 1,LC ), GC( 1,1,LC ), AAD, EVECCD, EVALD,
+     &                 WKD )
 
 
-            IF( .NOT.ONLYFL .AND. USRANG ) THEN
+c         ** Version 3: fix singularity problem in particular solution
+          IF( FBEAM.GT. 0.0) THEN
+            UMU0DI = UMU0L(LC)
+            UMU0SQ = UMU0L(LC)*UMU0L(LC)
+            DO 85 IQ = 1,NN
+              DENOM = 1. - UMU0SQ*KK(IQ,LC)*KK(IQ,LC)
+!              IF( ABS(DENOM).LT. 1.E-4 ) THEN
+              IF( ABS(DENOM).LT. 10.0*DITHER ) THEN
+                UMU0DI = 0.999 * UMU0L(LC)
+              ENDIF
+ 85         CONTINUE
+          ENDIF
 
-c                                            ** Interpolate eigenvectors
-c                                            ** to user angles
+c         ** Calculate particular solutions of Eq. SS(18), STWL(24a) for
+c         ** incident beam source.
+c         ** Version 3: upgraded subroutine UPBEAM to use reduced order matrix
+c         ** and LAPACK.
+          IF( FBEAM.GT.0.0 ) THEN
+            CALL UPBEAM( EIGEN_MAT, APB, AMB,
+     &                   NN, MAZIM, 
+     &                   MAXCMU, CMU, DELM0, FBEAM, 
+     &                   GL(0,LC), YLM0, YLMC, PI, UMU0DI,
+     o                   ZJ, ZZ( 1,LC) )
+          ENDIF
 
-               CALL TERPEV( CWT, EVECC, GL( 0,LC ), GU( 1,1,LC ), MAZIM,
-     &                      MXCMU, MXUMU, NN, NSTR, NUMU, WK, YLMC,
-     &                      YLMU )
-c                                            ** Interpolate source terms
-c                                            ** to user angles
+c         ** Calculate particular solutions of Eq. SS(15), STWL(25) for
+c         ** thermal emission source.
+          IF( PLANK .AND. MAZIM.EQ.0 ) THEN
+            XR1( LC ) = 0.0
 
-               CALL TERPSO( CWT, DELM0, FBEAM, GL( 0,LC ), MAZIM, MXCMU,
-     &                      PLANK, NUMU, NSTR, OPRIM( LC ), PI, YLM0,
-     &                      YLMC, YLMU, PSI0, PSI1, XR0( LC ),
-     &                      XR1( LC ), Z0, Z1, ZJ, ZBEAM( 1,LC ),
-     &                      Z0U( 1,LC ), Z1U( 1,LC ) )
+            IF( DTAUCP( LC ).GT.0.0 ) THEN
+              XR1( LC ) = ( PKAG( LC ) - PKAG( LC-1 ) ) / DTAUCP( LC )
+            ENDIF
 
-            END IF
+            XR0( LC ) = PKAG( LC-1 ) - XR1( LC )*TAUCPR( LC-1 )
 
-   80    CONTINUE
+            CALL UPISOT( ARRAY, CC, CMU, IPVT, MAXCMU, NN, NSTR,
+     &                   OPRIM( LC ), WK, XR0( LC ), XR1( LC ),
+     &                   Z0, Z1, ZPLK0( 1,LC ), ZPLK1( 1,LC ) )
+          ENDIF
 
+          IF( .NOT.ONLYFL .AND. USRANG ) THEN
+
+c           ** Interpolate eigenvectors to user angles
+            CALL TERPEV( CWT, EVECC, 
+     &                   GL( 0,LC ), GU( 1,1,LC ), MAZIM,
+     &                   MAXCMU, MAXUMU, NN, NSTR, NUMU, WK, YLMC,
+     &                   YLMU )
+
+c           ** Interpolate source terms to user angles
+            CALL TERPSO( CWT, DELM0, FBEAM, GL( 0,LC ), MAZIM, MAXCMU,
+     &                   PLANK, NUMU, NSTR, OPRIM( LC ),PI,YLM0,
+     &                   YLMC, YLMU, PSI0, PSI1, XR0( LC ),
+     &                   XR1( LC ), Z0, Z1, ZJ, ZBEAM( 1,LC ),
+     &                   Z0U( 1,LC ), Z1U( 1,LC ) )
+          ENDIF
+
+   80   CONTINUE
 c ===================  END LOOP ON COMPUTATIONAL LAYERS  ===============
 
 
-c                      ** Set coefficient matrix of equations combining
-c                      ** boundary and layer interface conditions
+c       ** Set coefficient matrix of equations combining boundary and layer
+c       ** interface conditions.
+        CALL SETMTX( BDR, CBAND, CMU, CWT, DELM0, DTAUCP, GC, KK,
+     &               LAMBER, LYRCUT, MAXCMU, NCOL, NCUT,
+     &               NLYR, NN, NSTR, TAUCPR, WK )
 
-         CALL SETMTX( BDR, CBAND, CMU, CWT, DELM0, DTAUCP, GC, KK,
-     &                LAMBER, LYRCUT, MI, MI9M2, MXCMU, NCOL, NCUT,
-     &                NNLYRI, NN, NSTR, TAUCPR, WK )
+c       ** Solve for constants of integration in homogeneous solution (general
+c       ** boundary conditions).
+c       ** Version 3 upgrade: LAPACK solver
+        CALL SOLVE0( B, BDR, BEM, BPLANK, CBAND, CMU, CWT, EXPBEA,
+     &               FBEAM, FISOT, IPVT, LAMBER, LL, LYRCUT, MAZIM, 
+     &               MAXCMU, NCOL, NCUT, NN, NSTR, NLYR, PI,
+     &               TPLANK, TAUCPR, UMU0, ZZ, ZPLK0, ZPLK1 )
 
-c                      ** Solve for constants of integration in homo-
-c                      ** geneous solution (general boundary conditions)
+c       ** Compute upward and downward fluxes
+        IF( MAZIM.EQ.0 ) THEN
+          CALL FLUXES( CMU, CWT, FBEAM, GC, KK, LAYRU, LL, LYRCUT,
+     &                  MAXULV, MAXCMU, MAXULV, NCUT, NN, NSTR, NTAU,
+     &                  PI, PRNT, PRNTU0( 1 ), SSALB, TAUCPR, UMU0,
+     &                  UTAU, UTAUPR, XR0, XR1, ZZ, ZPLK0, ZPLK1,
+     &                  DFDT, FLUP, FLDN, FLDIR, RFLDIR, RFLDN, UAVG,
+     &                  U0C, UMU0L, DTAUCP, DTAUC, TAUC )
+        ENDIF
 
-         CALL SOLVE0( B, BDR, BEM, BPLANK, CBAND, CMU, CWT, EXPBEA,
-     &                FBEAM, FISOT, IPVT, LAMBER, LL, LYRCUT, MAZIM, MI,
-     &                MI9M2, MXCMU, NCOL, NCUT, NN, NSTR, NNLYRI, PI,
-     &                TPLANK, TAUCPR, UMU0, Z, ZZ, ZPLK0, ZPLK1 )
+        IF( ONLYFL ) THEN
+          IF( MAXUMU.GE.NSTR ) THEN
+c           ** Save azimuthally averaged intensities at quadrature angles
+            DO 100 LU = 1, NTAU
+              DO 90 IQ = 1, NSTR
+                U0U( IQ, LU ) = U0C( IQ, LU )
+   90         CONTINUE
+  100       CONTINUE
+          ENDIF
+          GOTO 190
+        ENDIF
 
-c                                  ** Compute upward and downward fluxes
+        CALL ZEROIT( UUM, MAXUMU*MAXULV )
 
-         IF( MAZIM.EQ.0 )
-     &       CALL FLUXES( CMU, CWT, FBEAM, GC, KK, LAYRU, LL, LYRCUT,
-     &                    MAXULV, MXCMU, MXULV, NCUT, NN, NSTR, NTAU,
-     &                    PI, PRNT, PRNTU0( 1 ), SSALB, TAUCPR, UMU0,
-     &                    UTAU, UTAUPR, XR0, XR1, ZZ, ZPLK0, ZPLK1,
-     &                    DFDT, FLUP, FLDN, FLDIR, RFLDIR, RFLDN, UAVG,
-     &                    U0C )
+        IF( USRANG ) THEN
+c         ** Compute azimuthal intensity components at user angles
+          CALL USRINT( BPLANK, CMU, CWT, DELM0, DTAUCP, EMU, EXPBEA,
+     &                 FBEAM, FISOT, GC, GU, KK, LAMBER, LAYRU, LL,
+     &                 LYRCUT, MAZIM, MAXCMU, MAXULV,MAXUMU, NCUT, NLYR,
+     &                 NN, NSTR, PLANK, NUMU, NTAU, PI, RMU, TAUCPR,
+     &                 TPLANK, UMU, UMU0, UTAUPR, WK, ZBEAM, Z0U, Z1U,
+     &                 ZZ, ZPLK0, ZPLK1, UUM, UMU0L )
+        ELSE
+c         ** Compute azimuthal intensity components at quadrature angles
 
-         IF( ONLYFL ) THEN
+          CALL CMPINT( FBEAM, GC, KK, LAYRU, LL, LYRCUT, MAZIM, MAXCMU,
+     &                 MAXULV, MAXUMU, NCUT, NN, NSTR, PLANK, NTAU,
+     &                 TAUCPR, UTAUPR, ZZ, ZPLK0, ZPLK1, UUM,
+     &                 UMU0L, DTAUCP)
+        ENDIF
 
-            IF( MAXUMU.GE.NSTR ) THEN
-c                                     ** Save azimuthal-avg intensities
-c                                     ** at quadrature angles
-               DO 100 LU = 1, NTAU
+        IF( MAZIM.EQ.0 ) THEN
+c         ** Save azimuthally averaged intensities
+          DO 130 LU = 1, NTAU
+            DO 120 IU = 1, NUMU
+              U0U( IU, LU ) = UUM( IU, LU )
+              DO 110 J = 1, NPHI
+                UU( IU, LU, J ) = UUM( IU, LU )
+  110         CONTINUE
+  120       CONTINUE
+  130     CONTINUE
 
-                  DO 90 IQ = 1, NSTR
-                     U0U( IQ, LU ) = U0C( IQ, LU )
-   90             CONTINUE
+c         ** Print azimuthally averaged intensities at user angles
+          IF( PRNTU0( 2 ) ) THEN
+            CALL PRAVIN( UMU, NUMU, MAXUMU, UTAU, NTAU, U0U )
+          ENDIF
 
-  100          CONTINUE
+          IF( NAZ.GT.0 ) THEN
+            CALL ZEROIT( PHIRAD, MAXPHI )
+            DO 140 J = 1, NPHI
+              PHIRAD( J ) = RPD*( PHI( J ) - PHI0 )
+  140       CONTINUE
+          ENDIF
 
-            END IF
+        ELSE
+c         ** Increment intensity by current azimuthal component (Fourier cosine
+c         ** series); Eq SD(2), STWL(6).
 
-            GO TO  190
+          AZERR  = 0.0
 
-         END IF
+          DO 170 J = 1, NPHI
 
+            COSPHI = COS( MAZIM*PHIRAD( J ) )
 
-         CALL ZEROIT( UUM, MXUMU*MXULV )
-
-         IF( USRANG ) THEN
-c                                     ** Compute azimuthal intensity
-c                                     ** components at user angles
-
-            CALL USRINT( BPLANK, CMU, CWT, DELM0, DTAUCP, EMU, EXPBEA,
-     &                   FBEAM, FISOT, GC, GU, KK, LAMBER, LAYRU, LL,
-     &                   LYRCUT, MAZIM, MXCMU, MXULV, MXUMU, NCUT, NLYR,
-     &                   NN, NSTR, PLANK, NUMU, NTAU, PI, RMU, TAUCPR,
-     &                   TPLANK, UMU, UMU0, UTAUPR, WK, ZBEAM, Z0U, Z1U,
-     &                   ZZ, ZPLK0, ZPLK1, UUM )
-
-         ELSE
-c                                     ** Compute azimuthal intensity
-c                                     ** components at quadrature angles
-
-            CALL CMPINT( FBEAM, GC, KK, LAYRU, LL, LYRCUT, MAZIM, MXCMU,
-     &                   MXULV, MXUMU, NCUT, NN, NSTR, PLANK, NTAU,
-     &                   TAUCPR, UMU0, UTAUPR, ZZ, ZPLK0, ZPLK1, UUM )
-         END IF
-
-
-         IF( MAZIM.EQ.0 ) THEN
-c                               ** Save azimuthally averaged intensities
-
-            DO 130 LU = 1, NTAU
-
-               DO 120 IU = 1, NUMU
-                  U0U( IU, LU ) = UUM( IU, LU )
-
-                  DO 110 J = 1, NPHI
-                     UU( IU, LU, J ) = UUM( IU, LU )
-  110             CONTINUE
-
-  120          CONTINUE
-
-  130       CONTINUE
-c                              ** Print azimuthally averaged intensities
-c                              ** at user angles
-
-            IF( PRNTU0( 2 ) )
-     &          CALL PRAVIN( UMU, NUMU, MXUMU, UTAU, NTAU, U0U )
-
-            IF( NAZ.GT.0 ) THEN
-
-               CALL ZEROIT( PHIRAD, MXPHI )
-               DO 140 J = 1, NPHI
-                  PHIRAD( J ) = RPD*( PHI( J ) - PHI0 )
-  140          CONTINUE
-
-            END IF
-
-
-         ELSE
-c                                ** Increment intensity by current
-c                                ** azimuthal component (Fourier
-c                                ** cosine series);  Eq SD(2), STWL(6)
-            AZERR  = 0.0
-
-            DO 170 J = 1, NPHI
-
-               COSPHI = COS( MAZIM*PHIRAD( J ) )
-
-               DO 160 LU = 1, NTAU
-
-                  DO 150 IU = 1, NUMU
-                     AZTERM = UUM( IU, LU )*COSPHI
-                     UU( IU, LU, J ) = UU( IU, LU, J ) + AZTERM
-                     AZERR  = MAX( AZERR,
+            DO 160 LU = 1, NTAU
+              DO 150 IU = 1, NUMU
+                AZTERM          = UUM( IU, LU )*COSPHI
+                UU( IU, LU, J ) = UU( IU, LU, J ) + AZTERM
+                AZERR  = MAX( AZERR,
      &                        RATIO( ABS(AZTERM), ABS(UU(IU,LU,J)) ) )
-  150             CONTINUE
-
-  160          CONTINUE
-
+  150           CONTINUE
+  160         CONTINUE
   170       CONTINUE
 
-            IF( AZERR.LE.ACCUR ) KCONV  = KCONV + 1
+            IF( AZERR.LE.ACCUR ) THEN
+              KCONV  = KCONV + 1
+            ENDIF
 
-            IF( KCONV.GE.2 ) GO TO  190
+            IF( KCONV.GE.2 ) THEN
+              GOTO  190
+            ENDIF
 
-         END IF
+          ENDIF
 
-  180 CONTINUE
-
-c ===================  END LOOP ON AZIMUTHAL COMPONENTS  ===============
-
+  180   CONTINUE
 
   190 CONTINUE
+c ===================  END LOOP ON AZIMUTHAL COMPONENTS  ===============
 
-c                                    ** Apply Nakajima/Tanaka intensity
-c                                    ** corrections
+c     ** Version 3 debug block
+c      PRINT*,
+c      PRINT*, UMU0,NUMU,NSTR,NPHI
+c      PRINT*, (RHOU(NUMU/2+1,0,IU),IU=0,NSTR-1)
+c      PRINT*, (PHIRAD(IU)*180./3.141592653,IU=1,NPHI)
+c      PRINT*, 
+c      PRINT*,BDR_CORR(UMU0,UMU(NUMU/2+5),PHI(1)-PHI0,
+c     &                NSTR,RHOU(NUMU/2+5,0,0:NSTR-1))
 
+c     ** Apply Nakajima/Tanaka intensity corrections
       IF( CORINT )
-     &    CALL INTCOR( DITHER, FBEAM, FLYR, LAYRU, LYRCUT, MAXMOM,
-     &                 MAXULV, MAXUMU, NMOM, NCUT, NPHI, NSTR, NTAU,
-     &                 NUMU, OPRIM, PHASA, PHAST, PHASM, PHIRAD, PI,
-     &                 RPD, PMOM, SSALB, DTAUC, TAUC, TAUCPR, UMU,
-     &                 UMU0, UTAU, UTAUPR, UU )
+     &  CALL INTCOR( DITHER, FBEAM, FLYR, LAYRU, LYRCUT, MAXMOM,
+     &               MAXULV, MAXUMU, NMOM, NCUT, NPHI, NSTR, NTAU,
+     &               NUMU, OPRIM, PHASA, PHAST, PHASM, PHIRAD, PI,
+     &               RPD, PMOM, SSALB, DTAUC, TAUC, TAUCPR, UMU,
+     &               UMU0, UTAU, UTAUPR, UU, DELTAMPLUS )
 
-c                                          ** Print intensities
+c     ** Version 3: add new SS correction of beam reflection
+      IF(.NOT. LAMBER .AND. .NOT. LYRCUT .AND. FBEAM .NE. 0.0 ) THEN
+        CALL INTCOR_BEAM_REFLEC( NUMU, UMU, NPHI, PHI, PHI0, UMU0,
+     &                           MAXUMU, MAXPHI, MAXUMU, MAXULV,
+     &                           MI, NAZZ, NSTR, NTAU, NCUT, FBEAM,
+     &                           TAUCPR, UTAUPR, RHOU, RHO_ACCURATE,   
+     &                           LAYRU, LYRCUT, PI, UU )
+      ENDIF
 
-      IF( PRNT( 3 ) .AND. .NOT.ONLYFL )
-     &    CALL PRTINT( UU, UTAU, NTAU, UMU, NUMU, PHI, NPHI, MAXULV,
-     &                 MAXUMU )
-
+c     ** Print intensities
+      IF( PRNT( 3 ) .AND. .NOT.ONLYFL ) THEN
+        CALL PRTINT( UU, UTAU, NTAU, UMU, NUMU, PHI, NPHI, MAXULV,
+     &               MAXUMU )
+      ENDIF
 
       IF( PASS1 ) THEN
-c                                    ** Compare test case results with
-c                                    ** correct answers and abort if bad
+c       ** Compare test case results with correct answers and abort if bad
          COMPAR = .TRUE.
-
          CALL SLFTST( CORINT, ACCUR, ALBEDO, BTEMP, DELTAM, DTAUC( 1 ),
      &                FBEAM, FISOT, IBCND, LAMBER, NLYR, PLANK, NPHI,
      &                NUMU, NSTR, NTAU, ONLYFL, PHI( 1 ), PHI0, NMOM,
      &                PMOM( 0,1 ), PRNT, PRNTU0, SSALB( 1 ), TEMIS,
      &                TEMPER( 0 ), TTEMP, UMU( 1 ), USRANG, USRTAU,
      &                UTAU( 1 ), UMU0, WVNMHI, WVNMLO, COMPAR,
-     &                FLUP( 1 ), RFLDIR( 1 ), RFLDN( 1 ), UU( 1,1,1 ) )
+     &                FLUP( 1 ), RFLDIR( 1 ), RFLDN( 1 ), UU( 1,1,1 ),
+     &                DO_PSEUDO_SPHERE, DELTAMPLUS )
 
-         PASS1  = .FALSE.
-         GO TO  20
-
-      END IF
-
+         PASS1 = .FALSE.
+         GOTO 20
+      ENDIF
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE ASYMTX( AA, EVEC, EVAL, M, IA, IEVEC, IER, WKD, AAD,
      &                   EVECD, EVALD )
 
 c    =======  D O U B L E    P R E C I S I O N    V E R S I O N  ======
-
+c
 c       Solves eigenfunction problem for real asymmetric matrix
 c       for which it is known a priori that the eigenvalues are real.
-
+c
 c       This is an adaptation of a subroutine EIGRF in the IMSL
 c       library to use real instead of complex arithmetic, accounting
 c       for the known fact that the eigenvalues and eigenvectors in
@@ -887,15 +960,15 @@ c       putting all the called subroutines in-line, deleting the
 c       performance index calculation, updating many DO-loops
 c       to Fortran77, and in calculating the machine precision
 c       TOL instead of specifying it in a data statement.
-
+c
 c       EIGRF is based primarily on EISPACK routines.  The matrix is
 c       first balanced using the Parlett-Reinsch algorithm.  Then
 c       the Martin-Wilkinson algorithm is applied.
-
+c
 c       There is a statement 'J  = WKD( I )' that converts a double
 c       precision variable to an integer variable, that seems dangerous
 c       to us in principle, but seems to work fine in practice.
-
+c
 c       References:
 c          Dongarra, J. and C. Moler, EISPACK -- A Package for Solving
 c             Matrix Eigenvalue Problems, in Cowell, ed., 1984:
@@ -905,8 +978,8 @@ c         Parlett and Reinsch, 1969: Balancing a Matrix for Calculation
 c             of Eigenvalues and Eigenvectors, Num. Math. 13, 293-304
 c         Wilkinson, J., 1965: The Algebraic Eigenvalue Problem,
 c             Clarendon Press, Oxford
-
-
+c
+c
 c   I N P U T    V A R I A B L E S:
 c
 c       AA    :  input asymmetric matrix, destroyed after solved
@@ -976,9 +1049,13 @@ c     ..
      &          C4 / 0.95D0 / , C5 / 16.D0 / , C6 / 256.D0 / ,
      &          ZERO / 0.D0 / , ONE / 1.D0 /
 
+      P = 0d0
+      Q = 0d0
+      R = 0d0
 
       IER  = 0
       TOL  = D1MACH( 4 )
+      LB   = 0
 
       IF( M.LT.1 .OR. IA.LT.M .OR. IEVEC.LT.M )
      &    CALL ERRMSG( 'ASYMTX--bad input variable(s)', .TRUE. )
@@ -1002,8 +1079,10 @@ c                           ** Handle 1x1 and 2x2 special cases
 
          IF( AA( 1,1 ) .LT. AA( 2,2 ) ) SGN  = - ONE
 
-         EVAL( 1 ) = 0.5*( AA( 1,1 ) + AA( 2,2 ) + SGN*SQRT( DISCRI ) )
-         EVAL( 2 ) = 0.5*( AA( 1,1 ) + AA( 2,2 ) - SGN*SQRT( DISCRI ) )
+         EVAL( 1 ) = REAL( 0.5*( AA( 1,1 ) + AA( 2,2 ) + 
+     &                     SGN*SQRT( DISCRI ) ) )
+         EVAL( 2 ) = REAL( 0.5*( AA( 1,1 ) + AA( 2,2 ) - 
+     &                     SGN*SQRT( DISCRI ) ) )
          EVEC( 1,1 ) = 1.0
          EVEC( 2,2 ) = 1.0
 
@@ -1013,8 +1092,8 @@ c                           ** Handle 1x1 and 2x2 special cases
             RNORM = ABS( AA( 1,1 ) ) + ABS( AA( 1,2 ) ) +
      &              ABS( AA( 2,1 ) ) + ABS( AA( 2,2 ) )
             W     = TOL * RNORM
-            EVEC( 2,1 ) =   AA( 2,1 ) / W
-            EVEC( 1,2 ) = - AA( 1,2 ) / W
+            EVEC( 2,1 ) =   REAL( AA( 2,1 ) / W )
+            EVEC( 1,2 ) = - REAL( AA( 1,2 ) / W )
 
          ELSE
 
@@ -1631,7 +1710,7 @@ c                                   ** Multiply by transformation matrix
 c                           ** Interchange rows if permutations occurred
       DO 670 I = L-1, 1, -1
 
-         J  = WKD( I )
+         J  =  INT( WKD( I ) )
 
          IF( I.NE.J ) THEN
 
@@ -1648,7 +1727,7 @@ c                           ** Interchange rows if permutations occurred
 
       DO 690 I = K + 1, M
 
-         J  = WKD( I )
+         J  = INT( WKD( I ) )
 
          IF( I.NE.J ) THEN
 
@@ -1667,10 +1746,10 @@ c                         ** Put results into output arrays
 
       DO 720 J = 1, M
 
-         EVAL( J ) = EVALD( J )
+         EVAL( J ) = REAL( EVALD( J ) )
 
          DO 710 K = 1, M
-            EVEC( J, K ) = EVECD( J, K )
+            EVEC( J, K ) = REAL( EVECD( J, K ) )
   710    CONTINUE
 
   720 CONTINUE
@@ -1678,10 +1757,13 @@ c                         ** Put results into output arrays
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE CMPINT( FBEAM, GC, KK, LAYRU, LL, LYRCUT, MAZIM, MXCMU,
      &                   MXULV, MXUMU, NCUT, NN, NSTR, PLANK, NTAU,
-     &                   TAUCPR, UMU0, UTAUPR, ZZ, ZPLK0, ZPLK1, UUM )
+     &                   TAUCPR, UTAUPR, ZZ, ZPLK0, ZPLK1, UUM,
+     &                   UMU0L, DTAUCP )
 
 c          Calculates the Fourier intensity components at the quadrature
 c          angles for azimuthal expansion terms (MAZIM) in Eq. SD(2),
@@ -1741,7 +1823,8 @@ c     .. Scalar Arguments ..
 
       LOGICAL   LYRCUT, PLANK
       INTEGER   MAZIM, MXCMU, MXULV, MXUMU, NCUT, NN, NSTR, NTAU
-      REAL      FBEAM, UMU0
+      REAL      FBEAM
+      REAL      UMU0L(*), DTAUCP( * )
 c     ..
 c     .. Array Arguments ..
 
@@ -1752,7 +1835,7 @@ c     .. Array Arguments ..
 c     ..
 c     .. Local Scalars ..
 
-      INTEGER   IQ, JQ, LU, LYU
+      INTEGER   IQ, JQ, LU, LYU, LC
       REAL      ZINT
 c     ..
 c     .. Intrinsic Functions ..
@@ -1785,8 +1868,18 @@ c                                       ** Loop over user levels
 
             UUM( IQ, LU ) = ZINT
 
-            IF( FBEAM.GT.0.0 ) UUM( IQ, LU ) = ZINT +
-     &                         ZZ( IQ, LYU )*EXP( -UTAUPR( LU )/UMU0 )
+c comment and upgrade pseudo spherical correction            
+c            IF( FBEAM.GT.0.0 ) UUM( IQ, LU ) = ZINT +
+c     &                         ZZ( IQ, LYU )*EXP( -UTAUPR( LU )/UMU0 )
+            IF( FBEAM.GT.0.0 ) THEN
+              UUM(IQ, LU) = ZZ( IQ, LYU )
+              DO LC = 1, LYU-1
+                UUM( IQ, LU ) = UUM( IQ, LU ) 
+     &             * EXP(-DTAUCP(LC)/UMU0L(LC))
+              ENDDO
+              UUM(IQ, LU) = ZINT + UUM(IQ, LU)
+     &             * EXP( ( TAUCPR(LYU-1) - UTAUPR(LU) ) / UMU0L(LYU) )
+            ENDIF
 
             IF( PLANK .AND. MAZIM.EQ.0 )
      &          UUM( IQ, LU ) = UUM( IQ, LU ) + ZPLK0( IQ,LYU ) +
@@ -1798,12 +1891,15 @@ c                                       ** Loop over user levels
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE FLUXES( CMU, CWT, FBEAM, GC, KK, LAYRU, LL, LYRCUT,
      &                   MAXULV, MXCMU, MXULV, NCUT, NN, NSTR, NTAU,
      &                   PI, PRNT, PRNTU0, SSALB, TAUCPR, UMU0, UTAU,
      &                   UTAUPR, XR0, XR1, ZZ, ZPLK0, ZPLK1, DFDT,
-     &                   FLUP, FLDN, FLDIR, RFLDIR, RFLDN, UAVG, U0C )
+     &                   FLUP, FLDN, FLDIR, RFLDIR, RFLDN, UAVG, U0C,
+     &                   UMU0L, DTAUCP, DTAUC, TAUC )
 
 c       Calculates the radiative fluxes, mean intensity, and flux
 c       derivative with respect to optical depth from the m=0 intensity
@@ -1885,7 +1981,7 @@ c     .. Scalar Arguments ..
 
       LOGICAL   LYRCUT, PRNTU0
       INTEGER   MAXULV, MXCMU, MXULV, NCUT, NN, NSTR, NTAU
-      REAL      FBEAM, PI, UMU0
+      REAL      FBEAM, PI, UMU0, UMU0L( * )
 c     ..
 c     .. Array Arguments ..
 
@@ -1897,12 +1993,14 @@ c     .. Array Arguments ..
      &          RFLDIR( MAXULV ), RFLDN( MAXULV ), SSALB( * ),
      &          TAUCPR( 0:* ), U0C( MXCMU, MXULV ), UAVG( MAXULV ),
      &          UTAU( MAXULV ), UTAUPR( MXULV ), XR0( * ), XR1( * ),
-     &          ZPLK0( MXCMU, * ), ZPLK1( MXCMU, * ), ZZ( MXCMU, * )
+     &          ZPLK0( MXCMU, * ), ZPLK1( MXCMU, * ), ZZ( MXCMU, * ),
+     &          DTAUCP( * ), DTAUC( * ), TAUC( 0:* ) 
 c     ..
 c     .. Local Scalars ..
 
-      INTEGER   IQ, JQ, LU, LYU
+      INTEGER   IQ, JQ, LU, LYU, LC
       REAL      ANG1, ANG2, DIRINT, FACT, FDNTOT, FNET, PLSORC, ZINT
+      REAL      FACT2
 c     ..
 c     .. External Subroutines ..
 
@@ -1925,6 +2023,8 @@ c                                        ** Zero DISORT output arrays
       CALL ZEROIT( U0C, MXULV*MXCMU )
       CALL ZEROIT( FLDIR, MXULV )
       CALL ZEROIT( FLDN, MXULV )
+      !CALL ZEROIT( FACT, 1 )
+      FACT = 0.0
 
 c                                        ** Loop over user levels
       DO 80 LU = 1, NTAU
@@ -1944,10 +2044,26 @@ c                                                ** this level
 
          IF( FBEAM.GT.0.0 ) THEN
 
-            FACT         = EXP( -UTAUPR( LU ) / UMU0 )
+c  comment code and add spherical correction
+c            FACT         = EXP( -UTAUPR( LU ) / UMU0 )
+c            DIRINT       = FBEAM*FACT
+c            FLDIR( LU )  = UMU0*( FBEAM*FACT )
+c            RFLDIR( LU ) = UMU0*FBEAM * EXP( -UTAU( LU ) / UMU0 )
+
+c  condiser pseudo spherical correction            
+            FACT  = 0.0
+            FACT2 = 0.0
+            DO LC = 1, LYU-1
+              FACT = FACT - DTAUCP( LC ) / UMU0L(LC)
+              FACT2 = FACT2 - DTAUC( LC ) / UMU0L(LC)
+            ENDDO
+            FACT = FACT - ( UTAUPR(LU) - TAUCPR(LYU-1) ) / UMU0L(LYU)
+            FACT = EXP(FACT)
+            FACT2= FACT2- ( UTAU(LU) - TAUC(LYU-1) ) / UMU0L(LYU)
+            FACT2= EXP(FACT2)
             DIRINT       = FBEAM*FACT
-            FLDIR( LU )  = UMU0*( FBEAM*FACT )
-            RFLDIR( LU ) = UMU0*FBEAM * EXP( -UTAU( LU ) / UMU0 )
+            FLDIR( LU )  = UMU0 * ( FBEAM * FACT )
+            RFLDIR( LU ) = UMU0 * ( FBEAM * FACT2 )
 
          ELSE
 
@@ -2059,16 +2175,18 @@ c                                                ** this level
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE INTCOR( DITHER, FBEAM, FLYR, LAYRU, LYRCUT, MAXMOM,
      &                   MAXULV, MAXUMU, NMOM, NCUT, NPHI, NSTR, NTAU,
      &                   NUMU, OPRIM, PHASA, PHAST, PHASM, PHIRAD, PI,
      &                   RPD, PMOM, SSALB, DTAUC, TAUC, TAUCPR, UMU,
-     &                   UMU0, UTAU, UTAUPR, UU )
+     &                   UMU0, UTAU, UTAUPR, UU, DELTAMPLUS )
 
 c       Corrects intensity field by using Nakajima-Tanaka algorithm
 c       (1988). For more details, see Section 3.6 of STWL NASA report.
-
+c
 c                I N P U T   V A R I A B L E S
 c
 c       DITHER  10 times machine precision
@@ -2147,12 +2265,12 @@ c                   (delta-I-sub-IMS in STWL(A.19))
 c
 c   Called by- DISORT
 c   Calls- SINSCA, SECSCA
-
+c
 c +-------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
-      LOGICAL   LYRCUT
+      LOGICAL   LYRCUT, DELTAMPLUS
       INTEGER   MAXMOM, MAXULV, MAXUMU, NCUT, NMOM, NPHI, NSTR, NTAU,
      &          NUMU
       REAL      DITHER, FBEAM, PI, RPD, UMU0
@@ -2165,25 +2283,34 @@ c     .. Array Arguments ..
      &          PMOM( 0:MAXMOM, * ), SSALB( * ), TAUC( 0:* ),
      &          TAUCPR( 0:* ), UMU( * ), UTAU( * ), UTAUPR( * ),
      &          UU( MAXUMU, MAXULV, * )
+
 c     ..
 c     .. Local Scalars ..
 
       INTEGER   IU, JP, K, LC, LTAU, LU
       REAL      CTHETA, DTHETA, DUIMS, PL, PLM1, PLM2, THETA0, THETAP,
      &          USSNDM, USSP
+      REAL      f, sigma_sq, c 
 c     ..
 c     .. External Functions ..
 
       REAL      SECSCA, SINSCA
       EXTERNAL  SECSCA, SINSCA
+
 c     ..
 c     .. Intrinsic Functions ..
 
       INTRINSIC ABS, ACOS, COS, SQRT
 c     ..
 
+      THETA0 = 0.0
+      THETAP = 0.0
 
       DTHETA = 10.
+
+
+
+
 
 c                                ** Start loop over zenith angles
 
@@ -2193,6 +2320,7 @@ c                                ** Start loop over zenith angles
 
 c                                ** Calculate zenith angles of icident
 c                                ** and emerging directions
+
 
             THETA0 = ACOS( -UMU0 ) / RPD
             THETAP = ACOS( UMU( IU ) ) / RPD
@@ -2237,16 +2365,29 @@ c                                ** Calculate actual phase function
 
 c                                ** Calculate delta-M transformed
 c                                ** phase function
-               IF( K.LE.NSTR - 1 ) THEN
-
-                  DO 30 LC = 1, NCUT
-
-                     PHASM( LC ) = PHASM( LC ) + ( 2*K + 1 ) * PL *
+               DO 30 LC = 1, NCUT
+c              if( deltamPlus .and. k .le. nstr-1 .and.
+c     &               pmom(nstr,lc).ne.pmom(nstr+1,lc) ) then                               
+                 if( deltamPlus ) then 
+                   if( k .le. nstr-1 .and.
+     &               pmom(nstr,lc).ne.pmom(nstr+1,lc) ) then
+c                  ** Calculate new delta-m plus
+                   f = pmom(nstr, lc)
+                   sigma_sq = ( (nstr+1)**2 - (nstr)**2 ) / 
+     &             ( log(pmom(nstr,lc)**2) - log(pmom(nstr+1,lc)**2) )
+                   c = exp(nstr**2/(2*sigma_sq))
+                   f = c*f
+                   phasm(lc) = phasm(lc) + (2*k+1) * PL *(pmom(k,lc) 
+     &                         - f*exp(-k**2/(2*sigma_sq)))/(1.0-f)
+                   endif
+                 else IF( K.LE.NSTR - 1 ) THEN
+                   PHASM( LC ) = PHASM( LC ) + ( 2*K + 1 ) * PL *
      &                             ( PMOM( K,LC ) - FLYR( LC ) ) /
      &                             ( 1. - FLYR( LC ) )
-   30             CONTINUE
+                 end if
+   30          CONTINUE
 
-               END IF
+                 
 
    40       CONTINUE
 
@@ -2290,13 +2431,14 @@ c                                ** scattering below top level.
                DO 90 LU = LTAU, NTAU
 
                   IF( .NOT.LYRCUT .OR. LAYRU( LU ).LT.NCUT ) THEN
-
+                    if (.not. deltamPlus) then
                       DUIMS = SECSCA( CTHETA, FLYR, LAYRU( LU ), MAXMOM,
      &                                NMOM, NSTR, PMOM, SSALB, DTAUC,
      &                                TAUC, UMU( IU ), UMU0, UTAU( LU ),
      &                                FBEAM, PI )
 
                       UU( IU, LU, JP ) = UU( IU, LU, JP ) - DUIMS
+                    endif
 
                   END IF
 
@@ -2312,15 +2454,138 @@ c                                ** End loop over zenith angles
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
+
+      SUBROUTINE INTCOR_BEAM_REFLEC( NUMU, UMU, NPHI, PHI, PHI0, UMU0,
+     &                               MAXUMU, MAXPHI, MXUMU, MAXULV, MI,
+     &                               NAZZ, NSTR, NTAU, NCUT, FBEAM,
+     &                               TAUCPR, UTAUPR, RHOU, RHO_ACCURATE,
+     &                               LAYRU, LYRCUT, PI, UU  )
+c
+c          
+c  ** Version 3 subroutine **    
+c          
+c     Corrections of intensity field (reflected from lower boundary)
+c     by using an improved Nakajima-Tanaka algorithm 
+c     called after the original intensity correction subroutine INTCOR
+c          
+c     For more details, see DISORT3 paper section 3.5.2 and Eq.(43)        
+
+
+
+c                I N P U T   V A R I A B L E S
+c          
+c       NUMU    number of user polar angles
+c          
+c       UMU     cosine of emergent angle
+c
+c       NPHI    number of user azimuthal angles
+c          
+c       PHI     azimuthal angles in degree
+c          
+c       PHI0    azimuthal incident angles in degree
+c          
+c       UMU0    cosine of incident zenith angle
+c       
+c       NSTR    number of polar quadrature angles
+c
+c       NTAU    number of user-defined optical depths
+c
+c       NCUT    total number of computational layers considered
+c
+c       FBEAM   incident beam radiation at top
+c          
+c       TAUCPR  delta-M-scaled optical thickness
+c
+c       UTAUPR  delta-M-scaled version of UTAU
+c
+c       RHOU    BRDF fourier components matrix
+c
+c       RHO_ACCURATE    analytic brdf results
+c
+c       LAYRU   index of UTAU in multi-layered system
+c
+c       LYRCUT  logical flag for truncation of computational layer
+c
+c       PI      3.141592653.... constant
+c
+c
+c
+c                O U T P U T   V A R I A B L E S
+c
+c       UU      corrected intensity field;  UU(IU,LU,J)
+c                         IU=1,NUMU; LU=1,NTAU; J=1,NPHI
+c
+c
+c          
+c                I N T E R N A L   V A R I A B L E S
+c      
+c       RHO_APPROX    fourier expanded brdf results
+c
+c       DPHO          difference between analytic and fourier expanded
+c                     brdf results 
+c
+c       USS           intensity correction term from improved N/T method
+c                     (DISORT3 paper Eq. (43), third term on the righ hand side)
+c          
+c     Called by- DISORT after the original N/T correction
+c
+c +-------------------------------------------------------------------+
+          
+      REAL      RHO_APPROX(NUMU,NPHI), RHO_ACCURATE(MAXUMU, MAXPHI)
+      LOGICAL   LYRCUT
+      INTEGER   NUMU, NPHI, MAXUMU, MAXPHI, MXUMU, MI, NAZZ, NSTR
+      REAL      UMU(MAXUMU), PHI(MAXPHI), PHI0, FBEAM
+      INTEGER   IU, J, MAXULV, LAYRU( * )
+      REAL      TAUCPR( 0:* ), UTAUPR( * )
+      REAL      RHOU(MXUMU,0:MI, 0:NAZZ)
+      REAL      DRHO, USS, PI, UU( MAXUMU, MAXULV, * )
+      
+
+       DO IU = 1, NUMU
+
+         DO J = 1, NPHI
+
+           IF(UMU(IU) .GT. 0.0 .AND. RHO_ACCURATE(IU,J) .GT. 0.0 )THEN
+
+             RHO_APPROX(IU,J) = BDR_APPROX( PHI(J)-PHI0, NSTR, PI,
+     &                                      RHOU(IU,0,0:NSTR-1) )
+
+
+             DO LU = 1, NTAU
+
+               IF( .NOT.LYRCUT .OR. LAYRU( LU ) .LE. NCUT ) THEN
+
+                 DRHO = RHO_ACCURATE(IU,J) - RHO_APPROX(IU,J) 
+
+                 USS = UMU0 * FBEAM * DRHO
+     &                  * EXP( -TAUCPR(NCUT) / UMU0 )
+     &                  * EXP( (UTAUPR(LU) - TAUCPR(NCUT))/UMU(IU) )
+
+                 UU( IU, LU, J ) = UU( IU, LU, J) + USS
+               END IF
+
+             ENDDO
+            END IF
+        END DO
+       END DO
+
+
+      RETURN
+      END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+c ---------------------------------------------------------------------
       REAL FUNCTION  SECSCA( CTHETA, FLYR, LAYRU, MAXMOM, NMOM, NSTR,
      &                       PMOM, SSALB, DTAUC, TAUC, UMU, UMU0, UTAU,
      &                       FBEAM, PI )
 
 c          Calculates secondary scattered intensity of EQ. STWL (A7)
-
+c
 c                I N P U T   V A R I A B L E S
-
+c
 c        CTHETA  cosine of scattering angle
 c
 c        DTAUC   computational-layer optical depths
@@ -2465,13 +2730,17 @@ c                              ** Eq. STWL (A.13)
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE SETDIS( CMU, CWT, DELTAM, DTAUC, DTAUCP, EXPBEA, FBEAM,
      &                   FLYR, GL, IBCND, LAYRU, LYRCUT, MAXMOM, MAXUMU,
      &                   MXCMU, NCUT, NLYR, NTAU, NN, NSTR, PLANK, NUMU,
      &                   ONLYFL, CORINT, OPRIM, PMOM, SSALB, TAUC,
      &                   TAUCPR, UTAU, UTAUPR, UMU, UMU0, USRTAU,
-     &                   USRANG )
+     &                   USRANG, NAZZ, MI, SQT,
+     &                   DO_PSEUDO_SPHERE, EARTH_RADIUS, H_LYR, UMU0L,
+     &                   DELTAMPLUS)
 
 c          Perform miscellaneous setting-up operations
 c
@@ -2518,24 +2787,32 @@ c     .. Scalar Arguments ..
       LOGICAL   CORINT, DELTAM, LYRCUT, ONLYFL, PLANK, USRANG, USRTAU
       INTEGER   IBCND, MAXMOM, MAXUMU, MXCMU, NCUT, NLYR, NN, NSTR,
      &          NTAU, NUMU
-      REAL      FBEAM, UMU0
+      REAL      FBEAM
+      logical   DELTAMPLUS
 c     ..
 c     .. Array Arguments ..
 
       INTEGER   LAYRU( * )
       REAL      CMU( MXCMU ), CWT( MXCMU ), DTAUC( * ), DTAUCP( * ),
-     &          EXPBEA( 0:* ), FLYR( * ), GL( 0:MXCMU, * ), OPRIM( * ),
+     &          EXPBEA( 0:* ), FLYR( * ), GL( 0:NSTR, * ), OPRIM( * ),
      &          PMOM( 0:MAXMOM, * ), SSALB( * ), TAUC( 0:* ),
-     &          TAUCPR( 0:* ), UMU( MAXUMU ), UTAU( * ), UTAUPR( * )
+     &          TAUCPR( 0:* ), UMU( MAXUMU ), UTAU( * ), UTAUPR( * ),
+     &          SQT(2*NSTR)
+
+      REAL      EARTH_RADIUS, H_LYR(0:NLYR),UMU0P(NLYR,NLYR),UMU0L(NLYR)
+      LOGICAL   DO_PSEUDO_SPHERE
 c     ..
 c     .. Local Scalars ..
 
-      INTEGER   IQ, IU, K, LC, LU
-      REAL      ABSCUT, ABSTAU, F, YESSCT
+      INTEGER   IQ, IU, K, LC, LU, n
+      REAL      ABSCUT, ABSTAU, F, YESSCT, TAU_SLANT(0:NLYR )
+      real      sigma_sq, c 
+      INTEGER   NAZZ, MI, NS
 c     ..
 c     .. External Subroutines ..
 
-      EXTERNAL  ERRMSG, QGAUSN
+      EXTERNAL  ERRMSG, QGAUSN, R1MACH
+      REAL      R1MACH
 c     ..
 c     .. Intrinsic Functions ..
 
@@ -2543,6 +2820,7 @@ c     .. Intrinsic Functions ..
 c     ..
       DATA      ABSCUT / 10. /
 
+ 
 
       IF( .NOT.USRTAU ) THEN
 c                              ** Set output levels at computational
@@ -2560,6 +2838,14 @@ c                        ** of computational layers to local variables
       TAUCPR( 0 ) = 0.0
       ABSTAU      = 0.0
       YESSCT      = 0.0
+      TAU_SLANT( 0 ) = 0.0
+
+c                        ** Call Chapman function
+      IF( DO_PSEUDO_SPHERE ) THEN
+          CALL CHAPMAN( NLYR, UMU0, EARTH_RADIUS, H_LYR,
+     &                  UMU0P(1:NLYR,1:NLYR) ) 
+      ENDIF
+
 
       DO 40 LC = 1, NLYR
 
@@ -2571,8 +2857,7 @@ c                        ** of computational layers to local variables
 
          ABSTAU = ABSTAU + ( 1. - SSALB( LC ) )*DTAUC( LC )
 
-         IF( .NOT.DELTAM ) THEN
-
+         IF( .NOT.DELTAM .and. .not. DELTAMPLUS ) THEN
             OPRIM( LC )  = SSALB( LC )
             DTAUCP( LC ) = DTAUC( LC )
             TAUCPR( LC ) = TAUC( LC )
@@ -2582,9 +2867,11 @@ c                        ** of computational layers to local variables
    20       CONTINUE
 
             F  = 0.0
+            sigma_sq = 0.0
 
 
-         ELSE
+c         ELSE IF ( DELTAM .OR. PMOM(NSTR,LC) .EQ. PMOM(NSTR+1,LC) ) THEN
+         ELSE IF ( DELTAM .OR. PMOM(NSTR-1,LC) .EQ. PMOM(NSTR,LC) ) THEN
 c                                    ** Do delta-M transformation
 
             F  = PMOM( NSTR, LC )
@@ -2597,12 +2884,70 @@ c                                    ** Do delta-M transformation
      &                       ( PMOM( K,LC ) - F ) / ( 1. - F )
    30       CONTINUE
 
+         ELSE IF (PMOM(NSTR,LC).NE.PMOM(NSTR+1,LC).AND.DELTAMPLUS) THEN
+c        ** do new delta-M plus transformation
+C          if(PMOM(NSTR,LC).gt.PMOM(NSTR+1,LC)) then ! fix to avoid negative sigma_sq
+             f = pmom(nstr, lc)
+!           print*, pmom(nstr,lc),pmom(nstr+1,lc)
+             sigma_sq = ( (nstr+1)**2 - (nstr)**2 ) / 
+     &           ( log(pmom(nstr,lc)**2) - log(pmom(nstr+1,lc)**2) )
+             c = exp( nstr**2/(2*sigma_sq) )
+!           PRINT*, F, C, sigma_sq
+             f = c*f
+!           PRINT*, F, C, sigma_sq
+C          else
+C            f = PMOM( NSTR, LC ) ! go back to delta-M when PMOM(NSTR,LC) < PMOM(NSTR+1,LC)
+C          endif  
+             oprim(lc) = ssalb(lc)*(1.0-f) / (1.0-f*ssalb(lc))
+             dtaucp(lc) = (1.0-f*ssalb(lc)) * dtauc(lc)
+             taucpr(lc) = taucpr(lc-1) + dtaucp(lc)
+             do k = 0, nstr-1
+               gl(k, lc) = (2*k+1)*oprim(lc)*
+     &          (pmom(k,lc) -  f*exp(-k**2/(2*sigma_sq))) / (1.0-f) 
+             enddo
+         else
+           print*, "error: can't do both deltaM and deltaM-Plus"
+           exit
          END IF
 
          FLYR( LC ) = F
          EXPBEA( LC ) = 0.0
 
-         IF( FBEAM.GT.0.0 ) EXPBEA( LC ) = EXP( -TAUCPR( LC )/UMU0 )
+!         IF( FBEAM.GT.0.0 ) EXPBEA( LC ) = EXP( -TAUCPR( LC )/UMU0 )
+
+c        ** Pseudo spherical correction
+c        ** correct beam attenuation term 
+c        ** correct solar zenith angle
+         IF( FBEAM.GT.0.0 ) THEN
+            IF( .NOT. DO_PSEUDO_SPHERE ) THEN
+!                print*, LC, TAUCPR(LC), -TAUCPR( LC )/UMU0
+                IF( TAUCPR( LC )/UMU0 .LT. -LOG(R1MACH(1)) ) THEN 
+                    EXPBEA( LC ) = EXP( -TAUCPR( LC )/UMU0 )
+                ELSE
+                    EXPBEA( LC ) = 0.0;
+                ENDIF
+!                print*, EXPBEA(LC)
+                UMU0L( LC ) = UMU0
+            ELSE
+                TAU_SLANT(LC) = 0.0
+                DO N = 1, LC
+                  TAU_SLANT(LC) = TAU_SLANT(LC) + DTAUCP(N)/UMU0P(LC,N)
+                ENDDO
+                EXPBEA( LC ) = EXP( - TAU_SLANT(LC) )
+                IF ( DTAUCP( LC ) .NE. 0.0 ) THEN
+                  UMU0L( LC ) = DTAUCP( LC ) /
+     &                  ( TAU_SLANT(LC) - TAU_SLANT(LC-1) )
+                ELSE IF (DTAUCP( LC ) .EQ. 0.0 .AND. LC .GT. 1) THEN
+                  UMU0L( LC ) = UMU0L(LC-1)
+                ELSE
+                  UMU0L( LC ) = UMU0
+                END IF
+            ENDIF
+            !print*, DO_PSEUDO_SPHERE, umu0l(lc)
+
+           
+         ENDIF
+
 
    40 CONTINUE
 c                      ** If no thermal emission, cut off medium below
@@ -2632,9 +2977,11 @@ c                             ** computational mesh
 
    60    CONTINUE
          UTAUPR( LU ) = UTAU( LU )
-         IF( DELTAM ) UTAUPR( LU ) = TAUCPR( LC - 1 ) +
+         IF( DELTAM .or. deltamPlus ) THEN
+           UTAUPR( LU ) = TAUCPR( LC - 1 ) +
      &                               ( 1. - SSALB( LC )*FLYR( LC ) )*
      &                               ( UTAU( LU ) - TAUC( LC-1 ) )
+         endif
          LAYRU( LU ) = LC
 
    70 CONTINUE
@@ -2655,9 +3002,12 @@ c                                  ** Downward (neg) angles and weights
 c                               ** Compare beam angle to comput. angles
          DO 90 IQ = 1, NN
 
-            IF( ABS( UMU0-CMU( IQ ) )/UMU0.LT.1.E-4 ) CALL ERRMSG(
-     &          'SETDIS--beam angle=computational angle; change NSTR',
-     &          .True. )
+C           IF( ABS( UMU0-CMU( IQ ) )/UMU0.LT.1.E-4 ) CALL ERRMSG(
+C    &          'SETDIS--beam angle=computational angle; change NSTR',
+C    &          .True. )
+       IF( ABS( UMU0-CMU( IQ ) )/UMU0.LT.10.0*R1MACH(4) ) 
+     &     UMU0 = UMU0+10.0*R1MACH(4)
+
 
    90    CONTINUE
 
@@ -2680,23 +3030,23 @@ c                                   ** computational polar angles
 
       END IF
 
-
-      IF( USRANG .AND. IBCND.EQ.1 ) THEN
-
-c                               ** Shift positive user angle cosines to
-c                               ** upper locations and put negatives
-c                               ** in lower locations
-         DO 120 IU = 1, NUMU
-            UMU( IU + NUMU ) = UMU( IU )
-  120    CONTINUE
-
-         DO 130 IU = 1, NUMU
-            UMU( IU ) = -UMU( 2*NUMU + 1 - IU )
-  130    CONTINUE
-
-         NUMU = 2*NUMU
-
-      END IF
+CC    COMMENTED BLOCK FOR DYNAMIC ALLOCATION 2017-11-27
+CC     IF( USRANG .AND. IBCND.EQ.1 ) THEN
+CC
+CCc                               ** Shift positive user angle cosines to
+CCc                               ** upper locations and put negatives
+CCc                               ** in lower locations
+CC        DO 120 IU = 1, NUMU
+CC           UMU( IU + NUMU ) = UMU( IU )
+CC 120    CONTINUE
+CC
+CC        DO 130 IU = 1, NUMU
+CC           UMU( IU ) = -UMU( 2*NUMU + 1 - IU )
+CC 130    CONTINUE
+CC
+CC        NUMU = 2*NUMU
+CC
+CC     END IF
 
 c                               ** Turn off intensity correction when
 c                               ** only fluxes are calculated, there
@@ -2705,20 +3055,31 @@ c                               ** or delta-M transformation is not
 c                               ** applied
 c
       IF( ONLYFL .OR. FBEAM.EQ.0.0 .OR. YESSCT.EQ.0.0 .OR.
-     &   .NOT.DELTAM )  CORINT = .FALSE.
+     &   .NOT.(DELTAM .OR. DELTAMPLUS) .OR. DO_PSEUDO_SPHERE ) THEN  
+        CORINT = .FALSE.
+      END IF
 
+c     ** Version 3: Added NAZZ = MXCMU - 1
+      NAZZ = MXCMU-1
+      MI = MXCMU/2
+
+      DO NS = 1, 2*NSTR  
+         SQT( NS ) = SQRT( REAL( NS ) )
+      ENDDO
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE SETMTX( BDR, CBAND, CMU, CWT, DELM0, DTAUCP, GC, KK,
-     &                   LAMBER, LYRCUT, MI, MI9M2, MXCMU, NCOL, NCUT,
-     &                   NNLYRI, NN, NSTR, TAUCPR, WK )
+     &                   LAMBER, LYRCUT, MXCMU, NCOL, NCUT,
+     &                   NLYR, NN, NSTR, TAUCPR, WK )
 
 c        Calculate coefficient matrix for the set of equations
 c        obtained from the boundary conditions and the continuity-
 c        of-intensity-at-layer-interface equations;  store in the
-c        special banded-matrix format required by LINPACK routines
+c        special banded-matrix format required by LAPACK/LINPACK routines
 c
 c
 c    I N P U T      V A R I A B L E S:
@@ -2749,7 +3110,7 @@ c   O U T P U T     V A R I A B L E S:
 c
 c       CBAND    :  Left-hand side matrix of linear system Eq. SC(5),
 c                   scaled by Eq. SC(12); in banded form required
-c                   by LINPACK solution routines
+c                   by LAPACK/LINPACK solution routines
 c
 c       NCOL     :  Number of columns in CBAND
 c
@@ -2766,7 +3127,7 @@ c
 c
 c   BAND STORAGE
 c
-c      LINPACK requires band matrices to be input in a special
+c      LAPACK/LINPACK requires band matrices to be input in a special
 c      form where the elements of each diagonal are moved up or
 c      down (in their column) so that each diagonal becomes a row.
 c      (The column locations of diagonal elements are unchanged.)
@@ -2780,7 +3141,7 @@ c           0  0 43 44 45 46
 c           0  0  0 54 55 56
 c           0  0  0  0 65 66
 c
-c      then its LINPACK input form would be:
+c      then its LAPACK input form would be:
 c
 c           *  *  *  +  +  +  , * = not used
 c           *  * 13 24 35 46  , + = used for pivoting
@@ -2789,7 +3150,7 @@ c          11 22 33 44 55 66
 c          21 32 43 54 65  *
 c
 c      If A is a band matrix, the following program segment
-c      will convert it to the form (ABD) required by LINPACK
+c      will convert it to the form (ABD) required by LAPACK/LINPACK
 c      band-matrix routines:
 c
 c               N  = (column dimension of A, ABD)
@@ -2818,12 +3179,12 @@ c +-------------------------------------------------------------------+
 c     .. Scalar Arguments ..
 
       LOGICAL   LAMBER, LYRCUT
-      INTEGER   MI, MI9M2, MXCMU, NCOL, NCUT, NN, NNLYRI, NSTR
+      INTEGER   MXCMU, NCOL, NCUT, NN, NLYR, NSTR
       REAL      DELM0
 c     ..
 c     .. Array Arguments ..
 
-      REAL      BDR( MI, 0:MI ), CBAND( MI9M2, NNLYRI ), CMU( MXCMU ),
+      REAL      BDR( NN, 0:NN ), CBAND(9*NN-2,NSTR*NLYR), CMU( MXCMU ),
      &          CWT( MXCMU ), DTAUCP( * ), GC( MXCMU, MXCMU, * ),
      &          KK( MXCMU, * ), TAUCPR( 0:* ), WK( MXCMU )
 c     ..
@@ -2842,7 +3203,7 @@ c     .. Intrinsic Functions ..
 c     ..
 
 
-      CALL ZEROIT( CBAND, MI9M2*NNLYRI )
+      CALL ZEROIT( CBAND, (9*NN-2)*NSTR*NLYR )
 
       NCD    = 3*NN - 1
       LDA    = 3*NCD + 1
@@ -3002,14 +3363,16 @@ c                          ** truncated bottom layer
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       REAL FUNCTION  SINSCA( DITHER, LAYRU, NLYR, PHASE, OMEGA, TAU,
      &                       UMU, UMU0, UTAU, FBEAM, PI )
 
 c        Calculates single-scattered intensity from EQS. STWL (65b,d,e)
-
+c
 c                I N P U T   V A R I A B L E S
-
+c
 c        DITHER   10 times machine precision
 c
 c        LAYRU    index of UTAU in multi-layered system
@@ -3043,11 +3406,13 @@ c     ..
 c     .. Array Arguments ..
 
       REAL      OMEGA( * ), PHASE( * ), TAU( 0:* )
+!      real      rho
 c     ..
 c     .. Local Scalars ..
 
       INTEGER   LYR
       REAL      EXP0, EXP1
+
 c     ..
 c     .. Intrinsic Functions ..
 
@@ -3078,12 +3443,12 @@ c                                 ** UMU=UMU0, Eq. STWL (65e)
 
       IF( UMU.GT.0. ) THEN
 c                                 ** Upward intensity, Eq. STWL (65b)
-         DO 20 LYR = LAYRU, NLYR
 
+ 
+         DO 20 LYR = LAYRU, NLYR
             EXP1 = EXP( -( ( TAU( LYR )-UTAU )/UMU + TAU( LYR )/UMU0 ) )
             SINSCA = SINSCA + OMEGA( LYR )*PHASE( LYR )*( EXP0 - EXP1 )
             EXP0 = EXP1
-
    20    CONTINUE
 
       ELSE
@@ -3100,14 +3465,65 @@ c                                 ** Downward intensity, Eq. STWL (65d)
 
       SINSCA = FBEAM / ( 4.*PI * ( 1. + UMU/UMU0 ) ) * SINSCA
 
+!c     ** Version 3 old
+!      IF( .NOT. PASS1) THEN
+!        IF(UMU .GT. 0.) THEN
+!          INTENSITY_BOT_UP = UMU0*FBEAM*RHO*EXP(-TAU(NLYR)/UMU0) 
+!c          PRINT*,  RHO, SINSCA, SINSCA
+!c     &      + INTENSITY_BOT_UP * EXP((TAU(LAYRU)-TAU(NLYR))/UMU)
+!
+!          SINSCA = SINSCA 
+!     &      + INTENSITY_BOT_UP * EXP((UTAU-TAU(NLYR))/UMU)
+!        END IF
+!      END IF
+!c     ** Version 3 old
+
 
       RETURN
       END
+c- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-      SUBROUTINE SOLEIG( AMB, APB, ARRAY, CMU, CWT, GL, MI, MAZIM,
+c-----------------------------------------------------------------------
+      REAL FUNCTION BDR_APPROX( DPHI, NSTR, PI, RHOU )
+c     ** Version 3 function
+
+      REAL     DPHI
+      INTEGER  NSTR
+      INTEGER  M
+      REAL     RHOU(0:*)
+      REAL     RHO_APPROX, RHO_FLOURIER(0:NSTR)
+
+      REAL     BDREF
+      EXTERNAL BDREF
+
+      REAL     COSMPHI
+      REAL     PI
+      INTEGER  NAZ
+
+
+      NAZ = NSTR-1
+
+      RHO_APPROX = 0.0
+
+      DO M = 0, NAZ
+        RHO_FLOURIER(M) = RHOU(M)/PI
+        COSMPHI = COS(M*DPHI*PI/180.)
+        RHO_APPROX = RHO_APPROX + RHO_FLOURIER(M)*COSMPHI 
+      END DO
+
+      BDR_APPROX = RHO_APPROX
+      RETURN
+      END
+c     ** Version 3 function end
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+c ---------------------------------------------------------------------
+      SUBROUTINE SOLEIG( AMB, APB, ARRAY, CMU, CWT, GL, MAZIM,
      &                   MXCMU, NN, NSTR, YLMC, CC, EVECC, EVAL, KK, GC,
      &                   AAD, EVECCD, EVALD, WKD )
 
+c         ** Version 3 subroutine 
 c         Solves eigenvalue/vector problem necessary to construct
 c         homogeneous part of discrete ordinate solution; STWJ(8b),
 c         STWL(23f)
@@ -3173,21 +3589,25 @@ c +-------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
-      INTEGER   MAZIM, MI, MXCMU, NN, NSTR
+      INTEGER   MAZIM, MXCMU, NN, NSTR
 c     ..
 c     .. Array Arguments ..
 
-      REAL      AMB( MI, MI ), APB( MI, MI ), ARRAY( MI, * ),
-     &          CC( MXCMU, MXCMU ), CMU( MXCMU ), CWT( MXCMU ),
-     &          EVAL( MI ), EVECC( MXCMU, MXCMU ), GC( MXCMU, MXCMU ),
-     &          GL( 0:MXCMU ), KK( MXCMU ), YLMC( 0:MXCMU, MXCMU )
-      DOUBLE PRECISION AAD( MI, MI ), EVALD( MI ), EVECCD( MI, MI ),
+      REAL      AMB( NN, NN ), APB( NN, NN ), ARRAY( NN, NN ),
+     &          CC(NSTR,NSTR ), CMU( MXCMU ), CWT( MXCMU ),
+     &          EVAL( NN ), EVECC( NSTR,NSTR ), GC( MXCMU, MXCMU ),
+     &          GL( 0:NSTR ), KK( MXCMU ), YLMC( 0:MXCMU, MXCMU )
+      DOUBLE PRECISION AAD( NN, NN ), EVALD( NN ), EVECCD(NN,NN),
      &                 WKD( MXCMU )
 c     ..
 c     .. Local Scalars ..
 
       INTEGER   IER, IQ, JQ, KQ, L
       REAL      ALPHA, BETA, GPMIGM, GPPLGM, SUM
+
+c      .. Local Array ..
+      REAL      TMP(NN, NN)
+     
 c     ..
 c     .. External Subroutines ..
 
@@ -3252,10 +3672,11 @@ c                      ** STWL(23f)
 
    60    CONTINUE
 
+
    70 CONTINUE
 c                      ** Find (real) eigenvalues and eigenvectors
 
-      CALL ASYMTX( ARRAY, EVECC, EVAL, NN, MI, MXCMU, IER, WKD, AAD,
+      CALL ASYMTX( ARRAY, EVECC, EVAL, NN, NN, NSTR, IER, WKD, AAD,
      &             EVECCD, EVALD )
 
       IF( IER.GT.0 ) THEN
@@ -3276,7 +3697,7 @@ c                                      ** Add negative eigenvalue
    80 CONTINUE
 
 c                          ** Find eigenvectors (G+) + (G-) from SS(10)
-c                          ** and store temporarily in APB array
+c                          ** and store temporarily in array
       DO 110 JQ = 1, NN
 
          DO 100 IQ = 1, NN
@@ -3286,7 +3707,7 @@ c                          ** and store temporarily in APB array
                SUM  = SUM + AMB( IQ, KQ )*EVECC( KQ, JQ )
    90       CONTINUE
 
-            APB( IQ, JQ ) = SUM / EVAL( JQ )
+            TMP( IQ, JQ ) = SUM / EVAL( JQ )
 
   100    CONTINUE
 
@@ -3297,7 +3718,7 @@ c                          ** and store temporarily in APB array
 
          DO 120 IQ = 1, NN
 
-            GPPLGM = APB( IQ, JQ )
+            GPPLGM = TMP( IQ, JQ )
             GPMIGM = EVECC( IQ, JQ )
 c                                ** Recover eigenvectors G+,G- from
 c                                ** their sum and difference; stack them
@@ -3325,11 +3746,13 @@ c                                ** reversing sign of 'k' in SS(10) )
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE SOLVE0( B, BDR, BEM, BPLANK, CBAND, CMU, CWT, EXPBEA,
      &                   FBEAM, FISOT, IPVT, LAMBER, LL, LYRCUT, MAZIM,
-     &                   MI, MI9M2, MXCMU, NCOL, NCUT, NN, NSTR, NNLYRI,
-     &                   PI, TPLANK, TAUCPR, UMU0, Z, ZZ, ZPLK0, ZPLK1 )
+     &                   MXCMU, NCOL, NCUT, NN, NSTR, NLYR,
+     &                   PI, TPLANK, TAUCPR, UMU0, ZZ, ZPLK0, ZPLK1 )
 
 c        Construct right-hand side vector B for general boundary
 c        conditions STWJ(17) and solve system of equations obtained
@@ -3337,6 +3760,8 @@ c        from the boundary conditions and the continuity-of-
 c        intensity-at-layer-interface equations.
 c        Thermal emission contributes only in azimuthal independence.
 c
+c **    Version 3 upgrade: replace LINPAK by LAPACK 3.5.0   **
+c          
 c
 c    I N P U T      V A R I A B L E S:
 c
@@ -3348,7 +3773,7 @@ c       BPLANK   :  Bottom boundary thermal emission
 c
 c       CBAND    :  Left-hand side matrix of linear system Eq. SC(5),
 c                   scaled by Eq. SC(12); in banded form required
-c                   by LINPACK solution routines
+c                   by LAPACK solution routines
 c
 c       CMU,CWT  :  Abscissae, weights for Gauss quadrature
 c                   over angle cosine
@@ -3404,22 +3829,26 @@ c +-------------------------------------------------------------------+
 c     .. Scalar Arguments ..
 
       LOGICAL   LAMBER, LYRCUT
-      INTEGER   MAZIM, MI, MI9M2, MXCMU, NCOL, NCUT, NN, NNLYRI, NSTR
+      INTEGER   MAZIM, MXCMU, NCOL, NCUT, NN, NLYR, NSTR
       REAL      BPLANK, FBEAM, FISOT, PI, TPLANK, UMU0
 c     ..
 c     .. Array Arguments ..
 
       INTEGER   IPVT( * )
-      REAL      B( NNLYRI ), BDR( MI, 0:MI ), BEM( MI ),
-     &          CBAND( MI9M2, NNLYRI ), CMU( MXCMU ), CWT( MXCMU ),
+      REAL      B( NSTR*NLYR ), BDR( NN, 0:NN ), BEM( NN ),
+     &          CBAND(9*NN-2,NSTR*NLYR),CMU( MXCMU ),CWT( MXCMU ),
      &          EXPBEA( 0:* ), LL( MXCMU, * ), TAUCPR( 0:* ),
-     &          Z( NNLYRI ), ZPLK0( MXCMU, * ), ZPLK1( MXCMU, * ),
+     &          ZPLK0( MXCMU, * ), ZPLK1( MXCMU, * ),
      &          ZZ( MXCMU, * )
+
+          
+!      DOUBLE PRECISION LEFT_MAT(9*NN-2,NSTR*NLYR )
+!      DOUBLE PRECISION RIGHT_COL(NSTR*NLYR)
 c     ..
 c     .. Local Scalars ..
 
-      INTEGER   IPNT, IQ, IT, JQ, LC, NCD
-      REAL      RCOND, SUM
+      INTEGER   IPNT, IQ, IT, JQ, LC, NCD, INFO
+      REAL      SUM
 c     ..
 c     .. External Subroutines ..
 
@@ -3431,13 +3860,11 @@ c     .. Intrinsic Functions ..
 c     ..
 
 
-      CALL ZEROIT( B, NNLYRI )
+      CALL ZEROIT( B, NSTR*NLYR )
 c                              ** Construct B,  STWJ(20a,c) for
 c                              ** parallel beam + bottom reflection +
 c                              ** thermal emission at top and/or bottom
-
-      IF( MAZIM.GT.0 .AND. FBEAM.GT.0.0 ) THEN
-
+      IF( MAZIM.GT.0 .AND. FBEAM.GT.0.0 ) THEN 
 c                                         ** Azimuth-dependent case
 c                                         ** (never called if FBEAM = 0)
          IF( LYRCUT .OR. LAMBER ) THEN
@@ -3469,8 +3896,8 @@ c                                                  ** Bottom boundary
 
                B( NCOL - NN + IQ ) = SUM
                IF( FBEAM.GT.0.0 ) B( NCOL - NN + IQ ) = SUM +
-     &             ( BDR( IQ,0 )*UMU0*FBEAM/PI - ZZ( IQ+NN,NCUT ) )*
-     &             EXPBEA( NCUT )
+     &             ( BDR( IQ,0 )*UMU0*FBEAM/PI
+     &             - ZZ( IQ+NN,NCUT ) )*EXPBEA( NCUT )
 
    30       CONTINUE
 
@@ -3576,7 +4003,7 @@ c                             ** interfaces, STWJ(20b)
   140             CONTINUE
 
                   B(NCOL-NN+IQ) = 2.*SUM + ( BDR(IQ,0) * UMU0*FBEAM/PI
-     &                                - ZZ(IQ+NN, NCUT) ) * EXPBEA(NCUT)
+     &                            - ZZ(IQ+NN, NCUT) ) * EXPBEA(NCUT)
      &                            + BEM(IQ) * BPLANK
      &                            - ZPLK0(IQ+NN, NCUT)
      &                            - ZPLK1(IQ+NN, NCUT) * TAUCPR(NCUT)
@@ -3602,29 +4029,51 @@ c                             ** interfaces, STWJ(20b)
          END IF
 
       END IF
+
+      NCD    = 3*NN - 1
+
+c     ** version 3: LAPACK with single precision **
+c     L-U decomposition:  SGBTRF      
+c     Solve linear system: SGBTRS
+c      
+c
 c                     ** Find L-U (lower/upper triangular) decomposition
 c                     ** of band matrix CBAND and test if it is nearly
 c                     ** singular (note: CBAND is destroyed)
-c                     ** (CBAND is in LINPACK packed format)
-      RCOND  = 0.0
-      NCD    = 3*NN - 1
+c                     ** (CBAND is in LAPACK packed format)
 
-      CALL SGBCO( CBAND, MI9M2, NCOL, NCD, NCD, IPVT, RCOND, Z )
-
-      IF( 1.0 + RCOND.EQ.1.0 )
-     &    CALL ERRMSG('SOLVE0--SGBCO says matrix near singular',.FALSE.)
-
+      CALL SGBTRF( NCOL, NCOL, NCD, NCD, CBAND, 9*NN-2, IPVT, INFO )
+ 
+      IF( INFO .NE. 0 ) 
+     &   CALL ERRMSG('SOLVE0--SGBTRF says matrix near singular',.FALSE.)
+ 
 c                   ** Solve linear system with coeff matrix CBAND
 c                   ** and R.H. side(s) B after CBAND has been L-U
 c                   ** decomposed.  Solution is returned in B.
+ 
+      CALL SGBTRS( 'N', NCOL, NCD, NCD, 1, CBAND, 9*NN-2, IPVT,
+     &              B, NSTR*NLYR, INFO   )
 
-      CALL SGBSL( CBAND, MI9M2, NCOL, NCD, NCD, IPVT, B, 0 )
+
+
+
+c     ** code prior to Version 3: LINPACK with single precision
+c
+C      RCOND  = 0.0
+C      CALL SGBCO( CBAND, 9*NN-2, NCOL, NCD, NCD, IPVT, RCOND, Z )
+C      IF( 1.0 + RCOND.EQ.1.0 )
+C    &    CALL ERRMSG('SOLVE0--SGBCO says matrix near singular',.FALSE.)
+C      CALL SGBSL( CBAND, 9*NN-2, NCOL, NCD, NCD, IPVT, B, 0 )
+ 
+
+
+
 
 c                   ** Zero CBAND (it may contain 'foreign'
-c                   ** elements upon returning from LINPACK);
+c                   ** elements upon returning from LAPACK/LINPACK);
 c                   ** necessary to prevent errors
 
-      CALL ZEROIT( CBAND, MI9M2*NNLYRI )
+      CALL ZEROIT( CBAND, (9*NN-2)*NSTR*NLYR )
 
       DO 190 LC = 1, NCUT
 
@@ -3640,11 +4089,16 @@ c                   ** necessary to prevent errors
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-      SUBROUTINE SURFAC( ALBEDO, DELM0, CMU, FBEAM, LAMBER, MI, MAZIM,
-     &                   MXUMU, NN, NUMU, ONLYFL, PI, UMU, UMU0,
-     &                   USRANG, WVNMLO, WVNMHI, BDR, EMU, BEM, RMU )
+c ---------------------------------------------------------------------
+      SUBROUTINE SURFAC( ALBEDO, FBEAM, LAMBER, MI, MAZIM,
+     &                   MXUMU, NN, NUMU, ONLYFL, UMU, 
+     &                   USRANG, BDR, EMU, BEM, RMU, 
+     &                   RHOQ, RHOU, EMUST, BEMST, NAZZ )
 
+c     ** Version 3 has new added variables after RMU
+c
 c       Computes user's surface bidirectional properties, STWL(41)
 c
 c   I N P U T     V A R I A B L E S:
@@ -3669,7 +4123,7 @@ c
 c       BEM :  Surface directional emissivity (computational angles)
 c
 c       EMU :  Surface directional emissivity (user angles)
-c
+
 c    I N T E R N A L     V A R I A B L E S:
 
 c       DREF   :  Directional reflectivity
@@ -3699,21 +4153,24 @@ c     .. Scalar Arguments ..
 
       LOGICAL   LAMBER, ONLYFL, USRANG
       INTEGER   MAZIM, MI, MXUMU, NN, NUMU
-      REAL      ALBEDO, DELM0, FBEAM, PI, UMU0, WVNMHI, WVNMLO
+      REAL      ALBEDO, FBEAM 
+!      REAL      WVNMHI, WVNMLO, UMU0
+
 c     ..
 c     .. Array Arguments ..
-      REAL      BDR( MI, 0:MI ), BEM( MI ), CMU( * ), EMU( MXUMU ),
-     &          RMU( MXUMU, 0:MI ), UMU( * )
+      REAL      BDR( NN, 0:NN ), BEM( NN ), EMU( NUMU ),
+     &          RMU( NUMU, 0:NN ), UMU( * )
+c    ..
+      REAL RHOQ( MI, 0:MI, 0:NAZZ ), RHOU( MXUMU, 0:MI, 0:NAZZ ),
+     &     EMUST( NUMU ), BEMST( MI )
+c    ..
+
 c     ..
 c     .. Local Scalars ..
 
       LOGICAL   PASS1
-      INTEGER   IQ, IU, JG, JQ, K
-      REAL      DREF, SUM
-c     ..
-c     .. Local Arrays ..
+      INTEGER   IQ, IU, JQ
 
-      REAL      GMU( NMUG ), GWT( NMUG )
 c     ..
 c     .. External Functions ..
 
@@ -3728,26 +4185,24 @@ c     .. Intrinsic Functions ..
 
       INTRINSIC COS
 c     ..
-      SAVE      PASS1, GMU, GWT
+      SAVE      PASS1
       DATA      PASS1 / .True. /
 
+c      IF( PASS1 ) THEN
 
-      IF( PASS1 ) THEN
+c         PASS1  = .FALSE.
 
-         PASS1  = .FALSE.
+c         CALL QGAUSN( NMUG/2, GMU, GWT )
 
-         CALL QGAUSN( NMUG/2, GMU, GWT )
+c         DO 10 K = 1, NMUG / 2
+c            GMU( K + NMUG/2 ) = -GMU( K )
+c            GWT( K + NMUG/2 ) = GWT( K )
+c   10    CONTINUE
 
-         DO 10 K = 1, NMUG / 2
-            GMU( K + NMUG/2 ) = -GMU( K )
-            GWT( K + NMUG/2 ) = GWT( K )
-   10    CONTINUE
+c      END IF
 
-      END IF
-
-
-      CALL ZEROIT( BDR, MI*( MI+1 ) )
-      CALL ZEROIT( BEM, MI )
+      CALL ZEROIT( BDR, NN*( NN+1 ) )
+      CALL ZEROIT( BEM, NN )
 
 c                             ** Compute Fourier expansion coefficient
 c                             ** of surface bidirectional reflectance
@@ -3756,11 +4211,11 @@ c                             ** at computational angles Eq. STWL (41)
       IF( LAMBER .AND. MAZIM.EQ.0 ) THEN
 
          DO 30 IQ = 1, NN
-
             BEM( IQ ) = 1.0 - ALBEDO
 
             DO 20 JQ = 0, NN
                BDR( IQ, JQ ) = ALBEDO
+   
    20       CONTINUE
 
    30    CONTINUE
@@ -3771,28 +4226,13 @@ c                             ** at computational angles Eq. STWL (41)
 
             DO 50 JQ = 1, NN
 
-               SUM  = 0.0
-               DO 40 K = 1, NMUG
-                  SUM  = SUM + GWT( K ) *
-     &                   BDREF( WVNMLO, WVNMHI, CMU(IQ), CMU(JQ),
-     &                          PI*GMU(K) ) * COS( MAZIM*PI*GMU( K ) )
-   40          CONTINUE
-
-               BDR( IQ, JQ ) = 0.5 * ( 2. - DELM0 ) * SUM
+               BDR(IQ,JQ) = RHOQ(IQ,JQ,MAZIM)
 
    50       CONTINUE
 
-
             IF( FBEAM.GT.0.0 ) THEN
-
-               SUM  = 0.0
-               DO 60 K = 1, NMUG
-                  SUM  = SUM + GWT( K ) *
-     &                   BDREF( WVNMLO, WVNMHI, CMU(IQ), UMU0,
-     &                          PI*GMU(K) ) * COS( MAZIM*PI*GMU( K ) )
-   60          CONTINUE
-
-               BDR( IQ, 0 ) = 0.5 * ( 2. - DELM0 ) * SUM
+       
+                BDR(IQ,0) = RHOQ(IQ,0,MAZIM)
 
             END IF
 
@@ -3807,23 +4247,7 @@ c                             ** and incident angle cosines -GMU- to get
 c                             ** directional emissivity at computational
 c                             ** angle cosines -CMU-.
             DO 100 IQ = 1, NN
-
-               DREF  = 0.0
-
-               DO 90 JG = 1, NMUG
-
-                  SUM  = 0.0
-                  DO 80 K = 1, NMUG / 2
-                     SUM  = SUM + GWT( K ) * GMU( K ) *
-     &                      BDREF( WVNMLO, WVNMHI, CMU(IQ), GMU(K),
-     &                             PI*GMU(JG) )
-   80             CONTINUE
-
-                  DREF  = DREF + GWT( JG )*SUM
-
-   90          CONTINUE
-
-               BEM( IQ ) = 1.0 - DREF
+                BEM(IQ) = BEMST(IQ)
 
   100       CONTINUE
 
@@ -3836,48 +4260,31 @@ c                             ** at user angles Eq. STWL (41)
 
       IF( .NOT.ONLYFL .AND. USRANG ) THEN
 
-         CALL ZEROIT( EMU, MXUMU )
-         CALL ZEROIT( RMU, MXUMU*( MI+1 ) )
+         CALL ZEROIT( EMU, NUMU )
+         CALL ZEROIT( RMU, NUMU*( NN+1 ) )
 
          DO 170 IU = 1, NUMU
 
-            IF( UMU( IU ).GT.0.0 ) THEN
+            IF( UMU(IU).GT.0.0 ) THEN
 
                IF( LAMBER .AND. MAZIM.EQ.0 ) THEN
 
                   DO 110 IQ = 0, NN
-                     RMU( IU, IQ ) = ALBEDO
+                     RMU(IU,IQ) = ALBEDO
   110             CONTINUE
 
-                  EMU( IU ) = 1.0 - ALBEDO
+                  EMU(IU) = 1.0 - ALBEDO
 
                ELSE IF( .NOT.LAMBER ) THEN
 
                   DO 130 IQ = 1, NN
-
-                     SUM  = 0.0
-                     DO 120 K = 1, NMUG
-                        SUM  = SUM + GWT( K ) *
-     &                         BDREF( WVNMLO, WVNMHI, UMU(IU), CMU(IQ),
-     &                                PI*GMU(K) ) *
-     &                           COS( MAZIM*PI*GMU( K ) )
-  120                CONTINUE
-
-                     RMU( IU, IQ ) = 0.5 * ( 2. - DELM0 ) * SUM
+                  RMU(IU,IQ) = RHOU(IU,IQ,MAZIM)
 
   130             CONTINUE
 
                   IF( FBEAM.GT.0.0 ) THEN
 
-                     SUM  = 0.0
-                     DO 140 K = 1, NMUG
-                        SUM  = SUM + GWT( K ) *
-     &                         BDREF( WVNMLO, WVNMHI, UMU(IU), UMU0,
-     &                                PI*GMU(K) ) *
-     &                           COS( MAZIM*PI*GMU( K ) )
-  140                CONTINUE
-
-                     RMU( IU, 0 ) = 0.5 * ( 2. - DELM0 ) * SUM
+                   RMU(IU,0) = RHOU(IU,0,MAZIM)
 
                   END IF
 
@@ -3889,22 +4296,8 @@ c                               ** at reflection angle cosines -UMU- and
 c                               ** incident angle cosines -GMU- to get
 c                               ** directional emissivity at
 c                               ** user angle cosines -UMU-.
-                     DREF  = 0.0
 
-                     DO 160 JG = 1, NMUG
-
-                        SUM  = 0.0
-                        DO 150 K = 1, NMUG / 2
-                           SUM  = SUM + GWT( K )*GMU( K )*
-     &                            BDREF( WVNMLO, WVNMHI, UMU(IU),
-     &                                   GMU(K), PI*GMU(JG) )
-  150                   CONTINUE
-
-                        DREF  = DREF + GWT( JG ) * SUM
-
-  160                CONTINUE
-
-                     EMU( IU ) = 1.0 - DREF
+                      EMU(IU) = EMUST(IU)
 
                   END IF
 
@@ -3919,12 +4312,14 @@ c                               ** user angle cosines -UMU-.
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE TERPEV( CWT, EVECC, GL, GU, MAZIM, MXCMU, MXUMU, NN,
      &                   NSTR, NUMU, WK, YLMC, YLMU )
 
 c         Interpolate eigenvectors to user angles; Eq SD(8)
-
+c
 c   Called by- DISORT, ALBTRN
 c --------------------------------------------------------------------+
 
@@ -3934,7 +4329,7 @@ c     .. Scalar Arguments ..
 c     ..
 c     .. Array Arguments ..
 
-      REAL      CWT( MXCMU ), EVECC( MXCMU, MXCMU ), GL( 0:MXCMU ),
+      REAL      CWT( MXCMU ), EVECC( NSTR, NSTR ), GL( 0:NSTR ),
      &          GU( MXUMU, MXCMU ), WK( MXCMU ), YLMC( 0:MXCMU, MXCMU ),
      &          YLMU( 0:MXCMU, MXUMU )
 c     ..
@@ -3977,7 +4372,9 @@ c                                    ** and store eigenvectors
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE TERPSO( CWT, DELM0, FBEAM, GL, MAZIM, MXCMU, PLANK,
      &                   NUMU, NSTR, OPRIM, PI, YLM0, YLMC, YLMU, PSI0,
      &                   PSI1, XR0, XR1, Z0, Z1, ZJ, ZBEAM, Z0U, Z1U )
@@ -4045,8 +4442,8 @@ c     .. Scalar Arguments ..
 c     ..
 c     .. Array Arguments ..
 
-      REAL      CWT( MXCMU ), GL( 0:MXCMU ), PSI0( MXCMU ),
-     &          PSI1( MXCMU ), YLM0( 0:MXCMU ), YLMC( 0:MXCMU, MXCMU ),
+      REAL      CWT( MXCMU ), GL( 0:NSTR ), PSI0( MXCMU ),
+     &          PSI1( MXCMU ), YLM0(0:MXCMU,1), YLMC( 0:MXCMU, MXCMU ),
      &          YLMU( 0:MXCMU, * ), Z0( MXCMU ), Z0U( * ), Z1( MXCMU ),
      &          Z1U( * ), ZBEAM( * ), ZJ( MXCMU )
 c     ..
@@ -4078,7 +4475,7 @@ c                                  ** Beam source terms; Eq. SD(9)
             SUM    = 0.
             DO 30 IQ = MAZIM, NSTR - 1
                SUM  = SUM + YLMU( IQ, IU )*
-     &                    ( PSI0( IQ+1 ) + FACT*GL( IQ )*YLM0( IQ ) )
+     &                    ( PSI0( IQ+1 ) + FACT*GL( IQ )*YLM0(IQ,1) )
    30       CONTINUE
 
             ZBEAM( IU ) = SUM
@@ -4125,17 +4522,31 @@ c
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-      SUBROUTINE UPBEAM( ARRAY, CC, CMU, DELM0, FBEAM, GL, IPVT, MAZIM,
-     &                   MXCMU, NN, NSTR, PI, UMU0, WK, YLM0, YLMC, ZJ,
-     &                   ZZ )
 
+
+
+c ---------------------------------------------------------------------
+      SUBROUTINE UPBEAM( ARRAY, APB, AMB,
+     &                   NN, MAZIM, MXCMU,
+     &                   CMU, DELM0, FBEAM, GL, YLM0, YLMC,
+     &                   PI, UMU0, 
+     &                   ZJ, ZZ )
+ 
 c         Finds the incident-beam particular solution of SS(18),
 c         STWL(24a)
+c          
+c **   Version 3 upgrade:                                      **
+c **      1)  new algorithm: order of reduction                **
+c **      2)  double precision LAPACK 3.5.0                    **
+c **      3)  other change: shrink ARRAY dimension             **
+c          
+c          
 c
 c   I N P U T    V A R I A B L E S:
 c
-c       CC     :  C-sub-ij in Eq. SS(5)
+c       NN     :  half the total number of streams
 c
 c       CMU    :  Abscissae for Gauss quadrature over angle cosine
 c
@@ -4155,21 +4566,13 @@ c
 c       (remainder are DISORT input variables)
 c
 c
-c   O U T P U T    V A R I A B L E S:
+c   I N T E R N A L   V A R I A B L E S:
 c
-c       ZJ     :  Right-hand side vector X-sub-zero in SS(19),STWL(24b);
-c                 also the solution vector Z-sub-zero after solving
-c                 that system
-c
-c       ZZ     :  Permanent storage for ZJ, but re-ordered
-c
-c
-c   I N T E R N A L    V A R I A B L E S:
-c
-c       ARRAY  :  Coefficient matrix in left-hand side of Eq. SS(19),
-c                   STWL(24b)
-c       IPVT   :  Integer vector of pivot indices required by LINPACK
-c       WK     :  Scratch array required by LINPACK
+c       AMB,APB :  Matrices (alpha-beta), (alpha+beta) in reduced
+c                    eigenvalue problem
+c       ARRAY   :  Complete coefficient matrix of reduced particular
+c                  solution problem: (alfa+beta)*(alfa-beta)-1/umu0**
+c       IPVT   :  Integer vector of pivot indices required by LAPACK
 c
 c   Called by- DISORT
 c   Calls- SGECO, ERRMSG, SGESL
@@ -4177,70 +4580,115 @@ c +-------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
-      INTEGER   MAZIM, MXCMU, NN, NSTR
+      INTEGER   MAZIM, MXCMU, NN
       REAL      DELM0, FBEAM, PI, UMU0
 c     ..
 c     .. Array Arguments ..
 
-      INTEGER   IPVT( * )
-      REAL      ARRAY( MXCMU, MXCMU ), CC( MXCMU, MXCMU ), CMU( MXCMU ),
-     &          GL( 0:MXCMU ), WK( MXCMU ), YLM0( 0:MXCMU ),
-     &          YLMC( 0:MXCMU, * ), ZJ( MXCMU ), ZZ( MXCMU )
-c     ..
+      REAL      AMB( NN, NN ), APB( NN, NN ), 
+     &          ARRAY(NN,NN), 
+     &          CMU( MXCMU ),
+     &          YLM0( 0:MXCMU,1 ),
+     &          YLMC( 0:MXCMU, * ), GL( 0:MXCMU ), ZJ(MXCMU),
+     &          ZZ(MXCMU) 
+      INTEGER   IPVT ( NN  )
+c     ..      
 c     .. Local Scalars ..
 
-      INTEGER   IQ, JOB, JQ, K
-      REAL      RCOND, SUM
+      INTEGER   IQ, KQ, JOB
+
+      REAL*8    LEFT_MAT(NN,NN),  ZZP(NN), ZZM(NN) 
+      REAL*8    SUM, SUM1, SUM2, ZJM(NN), ZJP(NN), FACTOR
+      INTEGER   INFO
+
 c     ..
 c     .. External Subroutines ..
 
-      EXTERNAL  ERRMSG, SGECO, SGESL
+      EXTERNAL  ERRMSG, DGETRS, DGETRF 
 c     ..
 
+c     ** Pass argument, avoid contamination to array
 
-      DO 30 IQ = 1, NSTR
+c      LEFT_MAT = ARRAY*UMU0**2
+      LEFT_MAT = REAL(ARRAY,8)
 
-         DO 10 JQ = 1, NSTR
-            ARRAY( IQ, JQ ) = -CC( IQ, JQ )
-   10    CONTINUE
+      DO 50 IQ = 1, NN
 
-         ARRAY( IQ, IQ ) = 1.+ CMU( IQ ) / UMU0 + ARRAY( IQ, IQ )
+c     .. Left Matrix
 
-         SUM  = 0.
-         DO 20 K = MAZIM, NSTR - 1
-            SUM  = SUM + GL( K )*YLMC( K, IQ )*YLM0( K )
-   20    CONTINUE
+c         LEFT_MAT(IQ,IQ) = LEFT_MAT(IQ,IQ) - 1.
+         LEFT_MAT(IQ,IQ) = LEFT_MAT(IQ,IQ) - 1d0/REAL(UMU0,8)**2
 
-         ZJ( IQ ) = ( 2.- DELM0 )*FBEAM*SUM / ( 4.*PI )
-   30 CONTINUE
+c     .. Right Vector
+       
+         SUM1 = 0d0
+         SUM2 = 0d0
+         DO 60 K = MAZIM, 2*NN-1
+            SUM1  = SUM1 +
+     &        REAL(GL(K),8)*REAL(YLMC(K,IQ),8)   *REAL(YLM0(K,1),8)
+            SUM2  = SUM2 + 
+     &        REAL(GL(K),8)*REAL(YLMC(K,IQ+NN),8)*REAL(YLM0(K,1),8)
+   60    CONTINUE
+
+         FACTOR = ( 2d0-REAL(DELM0,8) )*REAL(FBEAM,8)/( 4d0*REAL(PI,8) )
+
+         ZJP(IQ) = FACTOR*(SUM1+SUM2)/REAL(CMU(IQ),8)
+         ZJM(IQ) = FACTOR*(SUM1-SUM2)/REAL(CMU(IQ),8)
+
+   50 CONTINUE
+         
+
+      DO 70 IQ = 1, NN
+         SUM = 0d0
+         DO 80 KQ = 1, NN
+            SUM = SUM + REAL(APB(IQ,KQ),8)*ZJM(KQ)
+   80    CONTINUE
+c         ZZM(IQ) = -SUM*UMU0**2- ZJP(IQ)*UMU0
+         ZZM(IQ) = -SUM - ZJP(IQ)/REAL(UMU0,8)
+
+   70 CONTINUE
 
 c                  ** Find L-U (lower/upper triangular) decomposition
 c                  ** of ARRAY and see if it is nearly singular
-c                  ** (NOTE:  ARRAY is altered)
-      RCOND  = 0.0
+c                  ** (NOTE: LEFT_MAT is altered)
 
-      CALL SGECO( ARRAY, MXCMU, NSTR, IPVT, RCOND, WK )
+      CALL DGETRF( NN, NN, LEFT_MAT, NN, IPVT, INFO )
 
-      IF( 1.0 + RCOND.EQ.1.0 )
-     &    CALL ERRMSG('UPBEAM--SGECO says matrix near singular',.FALSE.)
+
+      IF(INFO .NE. 0 ) THEN
+         PRINT*, 'BEAM MATRIX LU DECOMPOSITION (DGETRF) FAIL'
+      END IF
 
 c                ** Solve linear system with coeff matrix ARRAY
 c                ** (assumed already L-U decomposed) and R.H. side(s)
 c                ** ZJ;  return solution(s) in ZJ
-      JOB  = 0
+        JOB  = 0
 
-      CALL SGESL( ARRAY, MXCMU, NSTR, IPVT, ZJ, JOB )
+        CALL DGETRS('N', NN, 1,  LEFT_MAT, NN, IPVT, ZZM, NN, INFO )
 
+      IF(INFO .NE. 0 ) THEN
+         PRINT*, 'BEAM SOLUTION (DGETRS) FAIL'
+      END IF
 
-      DO 40 IQ = 1, NN
-         ZZ( IQ + NN )     = ZJ( IQ )
-         ZZ( NN + 1 - IQ ) = ZJ( IQ + NN )
-   40 CONTINUE
+        DO 90 IQ = 1, NN
+          SUM = 0.
+          DO 100 KQ = 1,NN
+            SUM = SUM + AMB(IQ,KQ)*ZZM(KQ)
+  100     CONTINUE 
+          ZZP(IQ) = ( SUM + ZJM(IQ) )*UMU0   
+   90   CONTINUE
 
+        DO 110 IQ = 1,NN
+           ZJ( IQ )     = 0.5*REAL(ZZP(IQ)+ZZM(IQ),4)
+           ZJ( NN+IQ )  = 0.5*REAL(ZZP(IQ)-ZZM(IQ),4)
+           ZZ( IQ+NN )  = ZJ( IQ )
+           ZZ( NN+1-IQ) = ZJ( IQ + NN )
+  110   CONTINUE
 
-      RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE UPISOT( ARRAY, CC, CMU, IPVT, MXCMU, NN, NSTR, OPRIM,
      &                   WK, XR0, XR1, Z0, Z1, ZPLK0, ZPLK1 )
 
@@ -4293,7 +4741,7 @@ c     ..
 c     .. Array Arguments ..
 
       INTEGER   IPVT( * )
-      REAL      ARRAY( MXCMU, MXCMU ), CC( MXCMU, MXCMU ), CMU( MXCMU ),
+      REAL      ARRAY(NSTR,NSTR ), CC(NSTR,NSTR ), CMU( MXCMU ),
      &          WK( MXCMU ), Z0( MXCMU ), Z1( MXCMU ), ZPLK0( MXCMU ),
      &          ZPLK1( MXCMU )
 c     ..
@@ -4323,18 +4771,18 @@ c                       ** Solve linear equations: same as in UPBEAM,
 c                       ** except ZJ replaced by Z1 and Z0
       RCOND  = 0.0
 
-      CALL SGECO( ARRAY, MXCMU, NSTR, IPVT, RCOND, WK )
+      CALL SGECO( ARRAY, NSTR, NSTR, IPVT, RCOND, WK )
 
       IF( 1.0 + RCOND.EQ.1.0 )
      &    CALL ERRMSG('UPISOT--SGECO says matrix near singular',.False.)
 
-      CALL SGESL( ARRAY, MXCMU, NSTR, IPVT, Z1, 0 )
+      CALL SGESL( ARRAY, NSTR, NSTR, IPVT, Z1, 0 )
 
       DO 30 IQ = 1, NSTR
          Z0( IQ ) = ( 1. - OPRIM ) * XR0 + CMU( IQ ) * Z1( IQ )
    30 CONTINUE
 
-      CALL SGESL( ARRAY, MXCMU, NSTR, IPVT, Z0, 0 )
+      CALL SGESL( ARRAY, NSTR, NSTR, IPVT, Z0, 0 )
 
       DO 40 IQ = 1, NN
          ZPLK0( IQ + NN ) = Z0( IQ )
@@ -4343,16 +4791,17 @@ c                       ** except ZJ replaced by Z1 and Z0
          ZPLK1( NN + 1 - IQ ) = Z1( IQ + NN )
    40 CONTINUE
 
-
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE USRINT( BPLANK, CMU, CWT, DELM0, DTAUCP, EMU, EXPBEA,
      &                   FBEAM, FISOT, GC, GU, KK, LAMBER, LAYRU, LL,
      &                   LYRCUT, MAZIM, MXCMU, MXULV, MXUMU, NCUT, NLYR,
      &                   NN, NSTR, PLANK, NUMU, NTAU, PI, RMU, TAUCPR,
      &                   TPLANK, UMU, UMU0, UTAUPR, WK, ZBEAM, Z0U, Z1U,
-     &                   ZZ, ZPLK0, ZPLK1, UUM )
+     &                   ZZ, ZPLK0, ZPLK1, UUM, UMU0L )
 
 c       Computes intensity components at user output angles
 c       for azimuthal expansion terms in Eq. SD(2), STWL(6)
@@ -4456,15 +4905,15 @@ c     .. Scalar Arguments ..
       LOGICAL   LAMBER, LYRCUT, PLANK
       INTEGER   MAZIM, MXCMU, MXULV, MXUMU, NCUT, NLYR, NN, NSTR, NTAU,
      &          NUMU
-      REAL      BPLANK, DELM0, FBEAM, FISOT, PI, TPLANK, UMU0
+      REAL      BPLANK, DELM0, FBEAM, FISOT, PI, TPLANK, UMU0, UMU0L(*)
 c     ..
 c     .. Array Arguments ..
 
       INTEGER   LAYRU( * )
-      REAL      CMU( MXCMU ), CWT( MXCMU ), DTAUCP( * ), EMU( MXUMU ),
+      REAL      CMU( MXCMU ), CWT( MXCMU ), DTAUCP( * ), EMU( NUMU ),
      &          EXPBEA( 0:* ), GC( MXCMU, MXCMU, * ),
      &          GU( MXUMU, MXCMU, * ), KK( MXCMU, * ), LL( MXCMU, * ),
-     &          RMU( MXUMU, 0:* ), TAUCPR( 0:* ), UMU( * ),
+     &          RMU( NUMU, 0:* ), TAUCPR( 0:* ), UMU( * ),
      &          UTAUPR( MXULV ), UUM( MXUMU, MXULV ), WK( MXCMU ),
      &          Z0U( MXUMU, * ), Z1U( MXUMU, * ), ZBEAM( MXUMU, * ),
      &          ZPLK0( MXCMU, * ), ZPLK1( MXCMU, * ), ZZ( MXCMU, * )
@@ -4481,6 +4930,10 @@ c     .. Intrinsic Functions ..
 
       INTRINSIC ABS, EXP
 c     ..
+
+      EXP0 = 0.0
+      EXP1 = 0.0
+      EXP2 = 0.0
 
 c                          ** Incorporate constants of integration into
 c                          ** interpolated eigenvectors
@@ -4499,8 +4952,21 @@ c                           ** Loop over levels at which intensities
 c                           ** are desired ('user output levels')
       DO 160 LU = 1, NTAU
 
-         IF( FBEAM.GT.0.0 ) EXP0  = EXP( -UTAUPR( LU ) / UMU0 )
+c  comment code      
+c        IF( FBEAM.GT.0.0 ) EXP0  = EXP( -UTAUPR( LU ) / UMU0 )
+
          LYU  = LAYRU( LU )
+c  update exp0 with pseudo spherical correction
+         EXP0 = 0.0
+         IF( FBEAM .GT. 0.0 ) THEN
+             DO LC = 1, LYU-1
+               EXP0 = EXP0 - DTAUCP(LC) / UMU0L( LC )
+             ENDDO
+             EXP0 = EXP0 - ( UTAUPR(LU) - TAUCPR(LYU-1) ) / UMU0L(LYU)
+             EXP0 = EXP(EXP0)
+         ENDIF
+
+
 c                              ** Loop over polar angles at which
 c                              ** intensities are desired
          DO 150 IU = 1, NUMU
@@ -4550,11 +5016,11 @@ c
 
                IF( FBEAM.GT.0.0 ) THEN
 
-                  DENOM  = 1. + UMU( IU ) / UMU0
+                  DENOM  = 1. + UMU( IU ) / UMU0L(LC)
 
                   IF( ABS( DENOM ).LT.0.0001 ) THEN
 c                                                   ** L'Hospital limit
-                     EXPN   = ( DTAU / UMU0 )*EXP0
+                     EXPN   = ( DTAU / UMU0L(LC) )*EXP0
 
                   ELSE
 
@@ -4622,11 +5088,11 @@ c                           ** output level to next computational level
 
             IF( FBEAM.GT.0.0 ) THEN
 
-               DENOM  = 1. + UMU( IU ) / UMU0
+               DENOM  = 1. + UMU( IU ) / UMU0L(LYU)
 
                IF( ABS( DENOM ).LT.0.0001 ) THEN
 
-                  EXPN   = ( DTAU1 / UMU0 )*EXP0
+                  EXPN   = ( DTAU1 / UMU0L(LYU) )*EXP0
 
                ELSE IF( NEGUMU ) THEN
 
@@ -4763,8 +5229,8 @@ c                            ** component for isotropic surface
   130          CONTINUE
 
                BNDDIR = 0.0
-               IF( FBEAM.GT.0.0 ) BNDDIR = UMU0*FBEAM / PI*RMU( IU, 0 )*
-     &                                     EXPBEA( NLYR )
+               IF( FBEAM.GT.0.0 ) BNDDIR = UMU0 * FBEAM 
+     &                               / PI*RMU( IU, 0 ) * EXPBEA( NLYR )
 
                BNDINT = ( BNDDFU + BNDDIR + DELM0 * EMU(IU) * BPLANK )
      &                  * EXP( (UTAUPR(LU)-TAUCPR(NLYR)) / UMU(IU) )
@@ -4782,13 +5248,15 @@ c                            ** component for isotropic surface
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       REAL FUNCTION  XIFUNC( UMU1, UMU2, UMU3, TAU )
 
 c          Calculates Xi function of EQ. STWL (72)
-
+c
 c                    I N P U T   V A R I A B L E S
-
+c
 c        TAU         optical thickness of the layer
 c
 c        UMU1,2,3    cosine of zenith angle_1, _2, _3
@@ -4845,30 +5313,32 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 c ******************************************************************
-c ********** DISORT service routines ************************
+c ***************** DISORT service routines ************************
 c ******************************************************************
 
+c ---------------------------------------------------------------------
       SUBROUTINE CHEKIN( NLYR, DTAUC, SSALB, NMOM, PMOM, TEMPER, WVNMLO,
      &                   WVNMHI, USRTAU, NTAU, UTAU, NSTR, USRANG,
      &                   NUMU, UMU, NPHI, PHI, IBCND, FBEAM, UMU0,
      &                   PHI0, FISOT, LAMBER, ALBEDO, BTEMP, TTEMP,
      &                   TEMIS, PLANK, ONLYFL, DELTAM, CORINT, ACCUR,
      &                   TAUC, MAXCLY, MAXULV, MAXUMU, MAXPHI, MAXMOM,
-     &                   MXCLY, MXULV, MXUMU, MXCMU, MXPHI, MXSQT )
+     &                   MAXCMU )
 
 c           Checks the input dimensions and variables
-
+c
 c   Calls- WRTBAD, WRTDIM, DREF, ERRMSG
 c   Called by- DISORT
-c --------------------------------------------------------------------
+c +------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
       LOGICAL   CORINT, DELTAM, LAMBER, ONLYFL, PLANK, USRANG, USRTAU
-      INTEGER   IBCND, MAXCLY, MAXMOM, MAXPHI, MAXULV, MAXUMU, MXCLY,
-     &          MXCMU, MXPHI, MXSQT, MXULV, MXUMU, NLYR, NMOM, NPHI,
+      INTEGER   IBCND, MAXCLY, MAXMOM, MAXPHI, MAXULV, MAXUMU,
+     &          MAXCMU, NLYR, NMOM, NPHI,
      &          NSTR, NTAU, NUMU
       REAL      ACCUR, ALBEDO, BTEMP, FBEAM, FISOT, PHI0, TEMIS, TTEMP,
      &          UMU0, WVNMHI, WVNMLO
@@ -4877,13 +5347,13 @@ c     .. Array Arguments ..
 
       REAL      DTAUC( MAXCLY ), PHI( MAXPHI ),
      &          PMOM( 0:MAXMOM, MAXCLY ), SSALB( MAXCLY ),
-     &          TAUC( 0:MXCLY ), TEMPER( 0:MAXCLY ), UMU( MAXUMU ),
+     &          TAUC( 0:MAXCLY ), TEMPER( 0:MAXCLY ), UMU( MAXUMU ),
      &          UTAU( MAXULV )
 c     ..
 c     .. Local Scalars ..
 
       LOGICAL   INPERR
-      INTEGER   IRMU, IU, J, K, LC, LU, NUMSQT
+      INTEGER   IRMU, IU, J, K, LC, LU
       REAL      FLXALB, RMU, YESSCT
 c     ..
 c     .. External Functions ..
@@ -4937,10 +5407,11 @@ c     ..
 
    10 CONTINUE
 
-      IF( NMOM.LT.0 .OR. ( YESSCT.GT.0.0 .AND. NMOM.LT.NSTR ) )
-     &    INPERR = WRTBAD( 'NMOM' )
+C      IF( NMOM.LT.0 .OR. ( YESSCT.GT.0.0 .AND. NMOM.LT.NSTR ) )
+C     &    INPERR = WRTBAD( 'NMOM' )
 
       IF( MAXMOM.LT.NMOM ) INPERR = WRTBAD( 'MAXMOM' )
+
 
       DO 30 LC = 1, NLYR
 
@@ -4948,6 +5419,7 @@ c     ..
 
             IF( PMOM( K,LC ).LT.-1.0 .OR. PMOM( K,LC ).GT.1.0 )
      &          INPERR = WRTBAD( 'PMOM' )
+C                write ( *, * ) PMOM(K,LC)
 
    20    CONTINUE
 
@@ -4978,8 +5450,9 @@ c     ..
          IF( MAXULV.LT.NLYR + 1 ) INPERR = WRTBAD( 'MAXULV' )
 
       END IF
-
-
+       
+! TOP LAYER IF ADDED 2017-11-27 TO AVOID CHECKING UMU AND OTHER VARS WHEN ONLYFL = .TRUE.  
+      IF( .NOT. ONLYFL ) THEN   
       IF( USRANG ) THEN
 
          IF( NUMU.LT.0 ) INPERR = WRTBAD( 'NUMU' )
@@ -4988,16 +5461,21 @@ c     ..
 
          IF( NUMU.GT.MAXUMU ) INPERR = WRTBAD( 'MAXUMU' )
 
-         IF( IBCND.EQ.1 .AND. 2*NUMU.GT.MAXUMU )
+         IF( IBCND.EQ.1 .AND. NUMU.GT.MAXUMU )
      &       INPERR = WRTBAD( 'MAXUMU' )
+C    MODIFIED FOR DYNAMIC ALLOCATION 2017-11-27
+C        IF( IBCND.EQ.1 .AND. 2*NUMU.GT.MAXUMU )
+C    &       INPERR = WRTBAD( 'MAXUMU' )
+
 
          DO 50 IU = 1, NUMU
 
             IF( UMU( IU ).LT.-1.0 .OR. UMU( IU ).GT.1.0 .OR.
      &          UMU( IU ).EQ.0.0 ) INPERR = WRTBAD( 'UMU' )
 
-            IF( IBCND.EQ.1 .AND. UMU( IU ).LT.0.0 )
-     &          INPERR = WRTBAD( 'UMU' )
+C    COMMENTED FOR DYNAMIC ALLOCATION 2017-11-27
+C           IF( IBCND.EQ.1 .AND. UMU( IU ).LT.0.0 )
+C    &          INPERR = WRTBAD( 'UMU' )
 
             IF( IU.GT.1 ) THEN
 
@@ -5012,7 +5490,7 @@ c     ..
          IF( MAXUMU.LT.NSTR ) INPERR = WRTBAD( 'MAXUMU' )
 
       END IF
-
+      ENDIF 
 
       IF( .NOT.ONLYFL .AND. IBCND.NE.1 ) THEN
 
@@ -5028,6 +5506,7 @@ c     ..
    60    CONTINUE
 
       END IF
+       
 
 
       IF( IBCND.LT.0 .OR. IBCND.GT.1 ) INPERR = WRTBAD( 'IBCND' )
@@ -5052,11 +5531,17 @@ c     ..
          ELSE
 c                    ** Make sure flux albedo at dense mesh of incident
 c                    ** angles does not assume unphysical values
+c                    ** NOTE: We could save some time if we check only 
+c                    ** 10 angles as opposed to 100. In which case you
+c                    ** can uncomment the two lines below.
+c            DO 70 IRMU = 0, 10
 
             DO 70 IRMU = 0, 100
 
+c               RMU  = IRMU*0.1
                RMU  = IRMU*0.01
-               FLXALB = DREF( WVNMLO, WVNMHI, RMU )
+c               FLXALB = DREF( WVNMLO, WVNMHI, RMU )
+               FLXALB = DREF( RMU )
 
                IF( FLXALB.LT.0.0 .OR. FLXALB.GT.1.0 )
      &             INPERR = WRTBAD( 'FUNCTION BDREF' )
@@ -5090,37 +5575,30 @@ c                    ** angles does not assume unphysical values
 
       IF( ACCUR.LT.0.0 .OR. ACCUR.GT.1.E-2 ) INPERR = WRTBAD( 'ACCUR' )
 
-      IF( MXCLY.LT.NLYR ) INPERR = WRTDIM( 'MXCLY', NLYR )
+      IF( MAXCLY.LT.NLYR ) INPERR = WRTDIM( 'MAXCLY', NLYR )
 
       IF( IBCND.NE.1 ) THEN
 
-         IF( USRTAU .AND. MXULV.LT.NTAU )
-     &       INPERR = WRTDIM( 'MXULV', NTAU )
+         IF( USRTAU .AND. MAXULV.LT.NTAU )
+     &       INPERR = WRTDIM( 'MAXULV', NTAU )
 
-         IF( .NOT.USRTAU .AND. MXULV.LT.NLYR + 1 )
-     &       INPERR = WRTDIM( 'MXULV', NLYR + 1 )
+         IF( .NOT.USRTAU .AND. MAXULV.LT.NLYR + 1 )
+     &       INPERR = WRTDIM( 'MAXULV', NLYR + 1 )
 
       ELSE
 
-         IF( MXULV.LT.2 ) INPERR = WRTDIM( 'MXULV', 2 )
+         IF( MAXULV.LT.2 ) INPERR = WRTDIM( 'MAXULV', 2 )
 
       END IF
 
-      IF( MXCMU.LT.NSTR ) INPERR = WRTDIM( 'MXCMU', NSTR )
+      IF( MAXCMU.LT.NSTR ) INPERR = WRTDIM( 'MAXCMU', NSTR )
 
-      IF( USRANG .AND. MXUMU.LT.NUMU ) INPERR = WRTDIM( 'MXUMU', NUMU )
+      IF( USRANG .AND. MAXUMU.LT.NUMU ) INPERR = WRTDIM('MAXUMU',NUMU)
 
-      IF( USRANG .AND. IBCND.EQ.1 .AND. MXUMU.LT.2*NUMU )
-     &    INPERR = WRTDIM( 'MXUMU', 2*NUMU )
 
-      IF( .NOT.USRANG .AND. MXUMU.LT.NSTR )
-     &    INPERR = WRTDIM( 'MXUMU', NSTR )
+      IF( .NOT.ONLYFL .AND. IBCND.NE.1 .AND. MAXPHI.LT.NPHI )
+     &    INPERR = WRTDIM( 'MAXPHI', NPHI )
 
-      IF( .NOT.ONLYFL .AND. IBCND.NE.1 .AND. MXPHI.LT.NPHI )
-     &    INPERR = WRTDIM( 'MXPHI', NPHI )
-
-      NUMSQT = 2*MAX( 100, NSTR )
-      IF( MXSQT.LT.NUMSQT ) INPERR = WRTDIM( 'MXSQT', NUMSQT )
 
       IF( INPERR )
      &    CALL ERRMSG( 'DISORT--input and/or dimension errors', .True. )
@@ -5145,9 +5623,14 @@ c                    ** angles does not assume unphysical values
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-      REAL FUNCTION  DREF( WVNMLO, WVNMHI, MU )
+c ---------------------------------------------------------------------
+      REAL FUNCTION  DREF( MU )
 
+c      REAL FUNCTION  DREF( WVNMLO, WVNMHI, MU )
+c      ** Version 3 removes unused WVNMLO, WVNMHI variables
+c
 c        Flux albedo for given angle of incidence, given
 c        a bidirectional reflectivity.
 c
@@ -5183,13 +5666,14 @@ c     .. Parameters ..
 c     ..
 c     .. Scalar Arguments ..
 
-      REAL      MU, WVNMHI, WVNMLO
+!      REAL      MU, WVNMHI, WVNMLO
+      REAL      MU
 c     ..
 c     .. Local Scalars ..
 
       LOGICAL   PASS1
-      INTEGER   JG, K
-      REAL      PI, SUM
+      INTEGER   K
+      REAL      PI
 c     ..
 c     .. Local Arrays ..
 
@@ -5232,26 +5716,27 @@ c     ..
       DREF = 0.0
 
 c                       ** Loop over azimuth angle difference
-      DO 30 JG = 1, NMUG
-
-         SUM  = 0.0
+c      DO 30 JG = 1, NMUG
+c
+c         SUM  = 0.0
 c                       ** Loop over angle of reflection
-         DO 20 K = 1, NMUG / 2
-            SUM  = SUM + GWT( K )*GMU( K )*
-     &             BDREF( WVNMLO, WVNMHI, GMU( K ), MU, PI*GMU( JG ) )
-   20    CONTINUE
-
-         DREF = DREF + GWT( JG )*SUM
-
-   30 CONTINUE
-
-      IF( DREF.LT.0.0 .OR. DREF.GT.1.0 )
-     &    CALL ERRMSG( 'DREF--albedo value not in (0,1)',.False. )
-
+c         DO 20 K = 1, NMUG / 2
+c            SUM  = SUM + GWT( K )*GMU( K )*
+c     &             BDREF( WVNMLO, WVNMHI, GMU( K ), MU, PI*GMU( JG ) )
+c   20    CONTINUE
+c
+c         DREF = DREF + GWT( JG )*SUM
+c
+c   30 CONTINUE
+c
+c      IF( DREF.LT.0.0 .OR. DREF.GT.1.0 )
+c     &    CALL ERRMSG( 'DREF--albedo value not in (0,1)',.False. )
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE LEPOLY( NMU, M, MAXMU, TWONM1, MU, SQT, YLM )
 
 c       Computes the normalized associated Legendre polynomial,
@@ -5373,7 +5858,130 @@ c                                   ** STWL(58a)
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+      SUBROUTINE LEPOLY0(  M, MAXMU, TWONM1, MU, SQT, YLM )
+C       Special version of LEPOLY, now MU is a scalar
+c       Computes the normalized associated Legendre polynomial,
+c       defined in terms of the associated Legendre polynomial
+c       Plm = P-sub-l-super-m as
+c
+c             Ylm(MU) = sqrt( (l-m)!/(l+m)! ) * Plm(MU)
+c
+c       for fixed order m and all degrees from l = m to TWONM1.
+c       When m.GT.0, assumes that Y-sub(m-1)-super(m-1) is available
+c       from a prior call to the routine.
+c
+c       REFERENCE: Dave, J.V. and B.H. Armstrong, Computations of
+c                  High-Order Associated Legendre Polynomials,
+c                  J. Quant. Spectrosc. Radiat. Transfer 10,
+c                  557-562, 1970.  (hereafter D/A)
+c
+c       METHOD: Varying degree recurrence relationship.
+c
+c       NOTES:
+c       (1) The D/A formulas are transformed by setting M=n-1; L=k-1.
+c       (2) Assumes that routine is called first with  M = 0, then with
+c           M = 1, etc. up to  M = TWONM1.
+c
+c
+c  I N P U T     V A R I A B L E S:
+c
+c       NMU    :  Number of arguments of YLM
+c
+c       M      :  Order of YLM
+c
+c       MAXMU  :  First dimension of YLM
+c
+c       TWONM1 :  Max degree of YLM
+c
+c       MU  :  Arguments of YLM (i = 1 to NMU)
+c
+c       SQT(k) :  Square root of k
+c
+c       If M.GT.0, YLM(M-1,i) for i = 1 to NMU is assumed to exist
+c       from a prior call.
+c
+c
+c  O U T P U T     V A R I A B L E:
+c
+c       YLM(l) :  l = M to TWONM1, normalized associated Legendre
+c                   polynomials evaluated at argument MU
+c   Called by- DISORT, ALBTRN
+c +-------------------------------------------------------------------+
+
+c     .. Scalar Arguments ..
+
+      INTEGER   M, MAXMU, TWONM1
+c     ..
+c     .. Array Arguments ..
+
+      REAL      MU, YLM( 0:MAXMU ), SQT( * )
+c     ..
+c     .. Local Scalars ..
+
+      INTEGER   L
+      REAL      TMP1, TMP2
+c     ..
+
+
+      IF( M.EQ.0 ) THEN
+c                             ** Upward recurrence for ordinary
+c                             ** Legendre polynomials
+c         DO 20 I = 1, NMU
+            YLM( 0 ) = 1.0
+            YLM( 1 ) = MU
+c   20    CONTINUE
+
+
+         DO 40 L = 2, TWONM1
+
+c            DO 30 I = 1, NMU
+               YLM( L) = ( ( 2*L - 1 )*MU*YLM( L-1 ) -
+     &                         ( L - 1 )*YLM( L-2 ) ) / L
+c   30       CONTINUE
+
+   40    CONTINUE
+
+
+      ELSE
+
+c         DO 50 I = 1, NMU
+c                               ** Y-sub-m-super-m; derived from
+c                               ** D/A Eqs. (11,12), STWL(58c)
+
+            YLM( M ) = - SQT( 2*M - 1 ) / SQT( 2*M )*
+     &                      SQRT( 1.- MU**2 )*YLM( M-1 )
+
+c                              ** Y-sub-(m+1)-super-m; derived from
+c                              ** D/A Eqs.(13,14) using Eqs.(11,12),
+c                              ** STWL(58f)
+
+            YLM( M+1 ) = SQT( 2*M + 1 )*MU*YLM( M )
+
+c   50    CONTINUE
+
+c                                   ** Upward recurrence; D/A EQ.(10),
+c                                   ** STWL(58a)
+         DO 70 L = M + 2, TWONM1
+
+            TMP1  = SQT( L - M )*SQT( L + M )
+            TMP2  = SQT( L - M - 1 )*SQT( L + M - 1 )
+
+c            DO 60 I = 1, NMU
+               YLM( L ) = ( ( 2*L - 1 )*MU*YLM( L-1 ) -
+     &                         TMP2*YLM( L-2 ) ) / TMP1
+c   60       CONTINUE
+
+   70    CONTINUE
+
+      END IF
+
+
+      RETURN
+      END
+
+c ---------------------------------------------------------------------
       REAL FUNCTION PLKAVG( WNUMLO, WNUMHI, T )
 
 c        Computes Planck function integrated between two wavenumbers
@@ -5484,7 +6092,8 @@ c     .. External Subroutines ..
 c     ..
 c     .. Intrinsic Functions ..
 
-      INTRINSIC ABS, ASIN, EXP, LOG, MOD
+!      INTRINSIC ABS, ASIN, EXP, LOG, MOD
+      INTRINSIC ABS, ASIN, LOG, MOD
 c     ..
 c     .. Statement Functions ..
 
@@ -5501,7 +6110,11 @@ c     .. Statement Function definitions ..
       PLKF( X ) = X**3 / ( EXP( X ) - 1 )
 c     ..
 
-
+      P( 1 ) = 0.0
+      P( 2 ) = 0.0
+      D( 1 ) = 0.0
+      D( 2 ) = 0.0
+      
       IF( PI .EQ. 0.0 ) THEN
 
          PI     = 2.*ASIN( 1.0 )
@@ -5527,7 +6140,7 @@ c     ..
 
       V( 1 ) = C2*WNUMLO / T
       V( 2 ) = C2*WNUMHI / T
-
+!      PRINT*, V 
       IF( V( 1 ).GT.EPSIL .AND. V( 2 ).LT.VMAX .AND.
      &    ( WNUMHI - WNUMLO ) / WNUMHI .LT. 1.E-2 ) THEN
 
@@ -5585,8 +6198,15 @@ c                                ** Find upper limit of series
             MMAX  = MMAX + 1
 
             IF( V(I) .LT. VCP( MMAX ) ) GO TO  40
-
-            EX     = EXP( - V(I) )
+!            print*, I, V(I), EX
+!            PRINT*, LOG(R1MACH(4))
+!            print*, log(r1mach(1))
+            IF( V(I) .LT. -LOG(R1MACH(1)) ) THEN 
+                EX     = EXP( - V(I) )
+            ELSE
+!            EX     = EXP( LOG(R1MACH(4)) )
+              EX = 0.0;
+            ENDIF
             EXM    = 1.0
             D( I ) = 0.0
 
@@ -5627,13 +6247,15 @@ c                                    ** WNUMLO and WNUMHI both large
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE PRAVIN( UMU, NUMU, MXUMU, UTAU, NTAU, U0U )
 
 c        Print azimuthally averaged intensities at user angles
-
+c
 c   Called by- DISORT
-
+c
 c     LENFMT   Max number of polar angle cosines UMU that can be
 c              printed on one line, as set in FORMAT statement
 c --------------------------------------------------------------------
@@ -5684,22 +6306,26 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE PRTINP( NLYR, DTAUC, DTAUCP, SSALB, NMOM, PMOM, TEMPER,
      &                   WVNMLO, WVNMHI, NTAU, UTAU, NSTR, NUMU, UMU,
      &                   NPHI, PHI, IBCND, FBEAM, UMU0, PHI0, FISOT,
      &                   LAMBER, ALBEDO, BTEMP, TTEMP, TEMIS, DELTAM,
      &                   PLANK, ONLYFL, CORINT, ACCUR, FLYR, LYRCUT,
-     &                   OPRIM, TAUC, TAUCPR, MAXMOM, PRTMOM )
+     &                   OPRIM, TAUC, TAUCPR, MAXMOM, PRTMOM,
+     &                   DO_PSEUDO_SPHERE, H_LYR, DELTAMPLUS )
 
 c        Print values of input variables
-
+c
 c   Called by- DISORT
 c --------------------------------------------------------------------
 
 c     .. Scalar Arguments ..
 
       LOGICAL   CORINT, DELTAM, LAMBER, LYRCUT, ONLYFL, PLANK, PRTMOM
+      LOGICAL   DO_PSEUDO_SPHERE, DELTAMPLUS
       INTEGER   IBCND, MAXMOM, NLYR, NMOM, NPHI, NSTR, NTAU, NUMU
       REAL      ACCUR, ALBEDO, BTEMP, FBEAM, FISOT, PHI0, TEMIS, TTEMP,
      &          UMU0, WVNMHI, WVNMLO
@@ -5708,7 +6334,8 @@ c     .. Array Arguments ..
 
       REAL      DTAUC( * ), DTAUCP( * ), FLYR( * ), OPRIM( * ),
      &          PHI( * ), PMOM( 0:MAXMOM, * ), SSALB( * ), TAUC( 0:* ),
-     &          TAUCPR( 0:* ), TEMPER( 0:* ), UMU( * ), UTAU( * )
+     &          TAUCPR( 0:* ), TEMPER( 0:* ), UMU( * ), UTAU( * ),
+     &          H_LYR( * ) 
 c     ..
 c     .. Local Scalars ..
 
@@ -5768,10 +6395,21 @@ c     ..
 
 
       IF( DELTAM ) WRITE( *, '(A)' ) ' Uses delta-M method'
-      IF( .NOT.DELTAM ) WRITE( *, '(A)' ) ' Does not use delta-M method'
+      IF( DELTAMPLUS ) WRITE( *, '(A)' ) ' Uses New-Delta-M+ method'
+      IF( .NOT.DELTAM .AND. .NOT. DELTAMPLUS ) 
+     & WRITE( *, '(A)' ) ' Does not use delta-M / delta-M Plus method'
 
       IF( CORINT ) WRITE( *, '(A)' ) ' Uses TMS/IMS method'
       IF( .NOT.CORINT ) WRITE( *,'(A)' ) ' Does not use TMS/IMS method'
+
+      IF(DO_PSEUDO_SPHERE) THEN
+        WRITE(*,'(A)') ' Uses pseudo spherical method'
+        WRITE(*,'(A15, 13(F5.2,2x))')' Layer height: ',
+     &                               (H_LYR(LC),LC=1,NLYR)
+      ENDIF
+      IF(.NOT.DO_PSEUDO_SPHERE) WRITE(*, '(A)' ) ' Uses plane'//
+     & ' parallel method'
+
 
 
       IF( IBCND.EQ.1 ) THEN
@@ -5861,16 +6499,18 @@ c                                       ** two WRITEs above)
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE PRTINT( UU, UTAU, NTAU, UMU, NUMU, PHI, NPHI, MAXULV,
      &                   MAXUMU )
 
-c         Prints the intensity at user polar and azimuthal angles
-
+c     Prints the intensity at user polar and azimuthal angles
+c
 c     All arguments are DISORT input or output variables
-
-c   Called by- DISORT
-
+c
+c     Called by- DISORT
+c
 c     LENFMT   Max number of azimuth angles PHI that can be printed
 c                on one line, as set in FORMAT statement
 c +-------------------------------------------------------------------+
@@ -5932,26 +6572,28 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE QGAUSN( M, GMU, GWT )
 
 c       Compute weights and abscissae for ordinary Gaussian quadrature
-c       on the interval (0,1);  that is, such that
-
-c           sum(i=1 to M) ( GWT(i) f(GMU(i)) )
-
+c       on the interval (0,1); that is, such that
+c
+c       sum(i=1 to M) ( GWT(i) f(GMU(i)) )
+c
 c       is a good approximation to
-
-c           integral(0 to 1) ( f(x) dx )
-
+c
+c       integral(0 to 1) ( f(x) dx )
+c
 c   INPUT :    M       order of quadrature rule
-
+c
 c   OUTPUT :  GMU(I)   array of abscissae (I = 1 TO M)
 c             GWT(I)   array of weights (I = 1 TO M)
-
+c
 c   REFERENCE:  Davis, P.J. and P. Rabinowitz, Methods of Numerical
-c                   Integration, Academic Press, New York, pp. 87, 1975
-
+c               Integration, Academic Press, New York, pp. 87, 1975
+c
 c   METHOD:  Compute the abscissae as roots of the Legendre
 c            polynomial P-sub-M using a cubically convergent
 c            refinement of Newton's method.  Compute the
@@ -5960,12 +6602,12 @@ c            that Newton's method can very easily diverge; only a
 c            very good initial guess can guarantee convergence.
 c            The initial guess used here has never led to divergence
 c            even for M up to 1000.
-
+c
 c   ACCURACY:  relative error no better than TOL or computer
 c              precision (machine epsilon), whichever is larger
-
+c
 c   INTERNAL VARIABLES:
-
+c
 c    ITER      : number of Newton Method iterations
 c    MAXIT     : maximum allowed iterations of Newton Method
 c    PM2,PM1,P : 3 successive Legendre polynomials
@@ -5974,7 +6616,7 @@ c    P2PRI     : 2nd derivative of Legendre polynomial
 c    TOL       : convergence criterion for Legendre poly root iteration
 c    X,XI      : successive iterates in cubically-convergent version
 c                of Newtons Method (seeking roots of Legendre poly.)
-
+c
 c   Called by- DREF, SETDIS, SURFAC
 c   Calls- D1MACH, ERRMSG
 c +-------------------------------------------------------------------+
@@ -5990,7 +6632,7 @@ c     ..
 c     .. Local Scalars ..
 
       INTEGER   ITER, K, LIM, MAXIT, NN, NP1
-      REAL      CONA, PI, T
+      DOUBLE PRECISION CONA, PI, T
       DOUBLE PRECISION EN, NNP1, ONE, P, P2PRI, PM1, PM2, PPR, PROD,
      &                 TMP, TOL, TWO, X, XI
 c     ..
@@ -6009,32 +6651,26 @@ c     .. Intrinsic Functions ..
 c     ..
       SAVE      PI, TOL
 
-      DATA      PI / 0.0 / , MAXIT / 1000 / , ONE / 1.D0 / ,
+      DATA      PI / 0.D0 / , MAXIT / 1000 / , ONE / 1.D0 / ,
      &          TWO / 2.D0 /
 
-
       IF( PI.EQ.0.0 ) THEN
-
-         PI   = 2.*ASIN( 1.0 )
+         PI   = 2.D0*DASIN( 1.D0 )
          TOL  = 10.*D1MACH( 4 )
-
       END IF
-
 
       IF( M.LT.1 ) CALL ERRMSG( 'QGAUSN--Bad value of M',.True.)
 
       IF( M.EQ.1 ) THEN
-
          GMU( 1 ) = 0.5
          GWT( 1 ) = 1.0
          RETURN
-
       END IF
 
-      EN   = M
+      EN   = DBLE(M)
       NP1  = M + 1
-      NNP1 = M*NP1
-      CONA = FLOAT( M - 1 ) / ( 8*M**3 )
+      NNP1 = DBLE(M*NP1)
+      CONA = DBLE( M - 1 ) / ( 8*M**3 )
 
       LIM  = M / 2
 
@@ -6043,7 +6679,7 @@ c                                        ** Initial guess for k-th root
 c                                        ** of Legendre polynomial, from
 c                                        ** Davis/Rabinowitz (2.7.3.3a)
          T  = ( 4*K - 1 )*PI / ( 4*M + 2 )
-         X  = COS( T + CONA / TAN( T ) )
+         X  = DCOS( T + CONA / DTAN( T ) )
          ITER = 0
 c                                        ** Upward recurrence for
 c                                        ** Legendre polynomials
@@ -6052,6 +6688,7 @@ c                                        ** Legendre polynomials
          PM2    = ONE
          PM1    = X
 
+         P = 0.D0
          DO 20 NN = 2, M
             P    = ( ( 2*NN - 1 )*X*PM1 - ( NN - 1 )*PM2 ) / NN
             PM2  = PM1
@@ -6065,7 +6702,7 @@ c                                              ** Newton Method
      &            ( P / PPR )*P2PRI / ( TWO*PPR ) )
 
 c                                              ** Check for convergence
-         IF( ABS( XI - X ).GT.TOL ) THEN
+         IF( DABS( XI - X ).GT.TOL ) THEN
 
             IF( ITER.GT.MAXIT )
      &          CALL ERRMSG( 'QGAUSN--max iteration count',.True.)
@@ -6076,8 +6713,8 @@ c                                              ** Check for convergence
          END IF
 c                             ** Iteration finished--calculate weights,
 c                             ** abscissae for (-1,1)
-         GMU( K ) = -X
-         GWT( K ) = TWO / ( TMP*( EN*PM2 )**2 )
+         GMU( K ) = - REAL( X )
+         GWT( K ) = REAL( TWO / ( TMP*( EN*PM2 )**2 ) )
          GMU( NP1 - K ) = -GMU( K )
          GWT( NP1 - K ) = GWT( K )
    30 CONTINUE
@@ -6092,7 +6729,7 @@ c                                    ** for rules of odd order
             PROD   = PROD * K / ( K - 1 )
    40    CONTINUE
 
-         GWT( LIM + 1 ) = TWO / PROD**2
+         GWT( LIM + 1 ) = REAL( TWO / PROD**2 )
       END IF
 
 c                                        ** Convert from (-1,1) to (0,1)
@@ -6104,7 +6741,9 @@ c                                        ** Convert from (-1,1) to (0,1)
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       REAL FUNCTION RATIO( A, B )
 
 c        Calculate ratio  A/B  with over- and under-flow protection
@@ -6211,13 +6850,16 @@ c                      ** from A*B because A*B may (over/under)flow
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE SLFTST( CORINT, ACCUR, ALBEDO, BTEMP, DELTAM, DTAUC,
      &                   FBEAM, FISOT, IBCND, LAMBER, NLYR, PLANK, NPHI,
      &                   NUMU, NSTR, NTAU, ONLYFL, PHI, PHI0, NMOM,
      &                   PMOM, PRNT, PRNTU0, SSALB, TEMIS, TEMPER,
      &                   TTEMP, UMU, USRANG, USRTAU, UTAU, UMU0, WVNMHI,
-     &                   WVNMLO, COMPAR, FLUP, RFLDIR, RFLDN, UU )
+     &                   WVNMLO, COMPAR, FLUP, RFLDIR, RFLDN, UU,
+     &                   DO_PSEUDO_SPHERE, DELTAMPLUS )
 
 c       If  COMPAR = FALSE, save user input values that would otherwise
 c       be destroyed and replace them with input values for self-test.
@@ -6244,7 +6886,7 @@ c +-------------------------------------------------------------------+
 c     .. Scalar Arguments ..
 
       LOGICAL   COMPAR, CORINT, DELTAM, LAMBER, ONLYFL, PLANK, USRANG,
-     &          USRTAU
+     &          USRTAU, DO_PSEUDO_SPHERE, DELTAMPLUS  
       INTEGER   IBCND, NLYR, NMOM, NPHI, NSTR, NTAU, NUMU
       REAL      ACCUR, ALBEDO, BTEMP, DTAUC, FBEAM, FISOT, FLUP, PHI,
      &          PHI0, RFLDIR, RFLDN, SSALB, TEMIS, TTEMP, UMU, UMU0,
@@ -6257,8 +6899,8 @@ c     .. Array Arguments ..
 c     ..
 c     .. Local Scalars ..
 
-      LOGICAL   CORINS, DELTAS, LAMBES, OK, ONLYFS, PLANKS, USRANS,
-     &          USRTAS
+      LOGICAL   CORINS, DELTAS, deltasp, LAMBES, OK, ONLYFS, PLANKS, 
+     &          USRANS, USRTAS, DO_PSEUDO_SPHERES
       INTEGER   I, IBCNDS, N, NLYRS, NMOMS, NPHIS, NSTRS, NTAUS, NUMUS
       REAL      ACC, ACCURS, ALBEDS, BTEMPS, DTAUCS, ERROR1, ERROR2,
      &          ERROR3, ERROR4, FBEAMS, FISOTS, PHI0S, PHIS, SSALBS,
@@ -6267,7 +6909,7 @@ c     ..
 c     .. Local Arrays ..
 
       LOGICAL   PRNTS( 5 ), PRNU0S( 2 )
-      REAL      PMOMS( 0:4 ), TEMPES( 0:1 )
+      REAL      PMOMS( 0:5 ), TEMPES( 0:1 )
 c     ..
 c     .. External Functions ..
 
@@ -6292,7 +6934,7 @@ c                                     ** Save user input values
          DTAUCS = DTAUC
          SSALBS = SSALB
 
-         DO 10 N = 0, 4
+         DO 10 N = 0, 5
             PMOMS( N ) = PMOM( N )
    10    CONTINUE
 
@@ -6314,6 +6956,7 @@ c                                     ** Save user input values
          LAMBES = LAMBER
          ALBEDS = ALBEDO
          DELTAS = DELTAM
+         DELTASP = DELTAMPLUS 
          ONLYFS = ONLYFL
          CORINS = CORINT
          ACCURS = ACCUR
@@ -6325,6 +6968,7 @@ c                                     ** Save user input values
          TEMISS = TEMIS
          TEMPES( 0 ) = TEMPER( 0 )
          TEMPES( 1 ) = TEMPER( 1 )
+         DO_PSEUDO_SPHERES = DO_PSEUDO_SPHERE 
 
          DO 20 I = 1, 5
             PRNTS( I ) = PRNT( I )
@@ -6346,6 +6990,7 @@ c                          ** Haze L moments
          PMOM( 2 ) = 0.646094
          PMOM( 3 ) = 0.481851
          PMOM( 4 ) = 0.359056
+!         PMOM( 5 ) = 0.0
          USRANG = .TRUE.
          NUMU   = 1
          UMU    = 0.5
@@ -6362,6 +7007,7 @@ c                          ** Haze L moments
          LAMBER = .TRUE.
          ALBEDO = 0.7
          DELTAM = .TRUE.
+         DELTAMPLUS = .FALSE.
          ONLYFL = .FALSE.
          CORINT = .TRUE.
          ACCUR  = 1.E-4
@@ -6373,6 +7019,7 @@ c                          ** Haze L moments
          TEMIS  = 0.8
          TEMPER( 0 ) = 210.0
          TEMPER( 1 ) = 200.0
+         DO_PSEUDO_SPHERE = .FALSE.
 
          DO 40 I = 1, 5
             PRNT( I ) = .FALSE.
@@ -6387,6 +7034,7 @@ c                          ** Haze L moments
 c                                    ** Compare test case results with
 c                                    ** correct answers and abort if bad
          OK     = .TRUE.
+
 
          ERROR1 = ( UU - 47.865571 ) / 47.865571
          ERROR2 = ( RFLDIR - 1.527286 ) / 1.527286
@@ -6408,7 +7056,7 @@ c                                      ** Restore user input values
          DTAUC  = DTAUCS
          SSALB  = SSALBS
 
-         DO 60 N = 0, 4
+         DO 60 N = 0, 5
             PMOM( N ) = PMOMS( N )
    60    CONTINUE
 
@@ -6430,6 +7078,7 @@ c                                      ** Restore user input values
          LAMBER = LAMBES
          ALBEDO = ALBEDS
          DELTAM = DELTAS
+         DELTAMPLUS = DELTASP 
          ONLYFL = ONLYFS
          CORINT = CORINS
          ACCUR  = ACCURS
@@ -6441,6 +7090,7 @@ c                                      ** Restore user input values
          TEMIS  = TEMISS
          TEMPER( 0 ) = TEMPES( 0 )
          TEMPER( 1 ) = TEMPES( 1 )
+         DO_PSEUDO_SPHERE = DO_PSEUDO_SPHERES 
 
          DO 70 I = 1, 5
             PRNT( I ) = PRNTS( I )
@@ -6455,7 +7105,9 @@ c                                      ** Restore user input values
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE ZEROAL( ND1, EXPBEA, FLYR, OPRIM, PHASA, PHAST, PHASM,
      &                        TAUCPR, XR0, XR1,
      &                   ND2, CMU, CWT, PSI0, PSI1, WK, Z0, Z1, ZJ,
@@ -6479,7 +7131,7 @@ c                                      ** Restore user input values
 
 c         ZERO ARRAYS; NDn is dimension of all arrays following
 c         it in the argument list
-
+c
 c   Called by- DISORT
 c --------------------------------------------------------------------
 
@@ -6618,7 +7270,10 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+
+c ---------------------------------------------------------------------
       SUBROUTINE ZEROIT( A, LENGTH )
 
 c         Zeros a real array A having LENGTH elements
@@ -6647,6 +7302,59 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+      subroutine chapman(nlyr, umu0, r0, h_lyr, umu0p)
+      INTEGER    nlyr
+      REAL       r0, h_lyr(0:nlyr), h(0:nlyr), umu0
+      REAL       umu0p(nlyr, nlyr)
+
+c     .. local variable .. 
+      INTEGER    lc, n
+      REAL       cos_theta0, sin_theta0, cos_theta, sin_theta
+      REAL       s1, s2
+
+
+      cos_theta0 = umu0
+      sin_theta0 = sqrt(1. - umu0*umu0)
+      h = h_lyr + r0
+
+      do 30 lc = 1, nlyr
+        sin_theta = sin_theta0 * h(lc) / h(0)
+        cos_theta = sqrt( 1. - sin_theta * sin_theta )
+        s1        = 0.
+        do 40 n = 1, lc
+          s2 = h(0)*cos_theta 
+     &       - sqrt( h(n)*h(n) - h(0)*h(0)*sin_theta*sin_theta )
+          !consider special case for delta h = 0
+          if (s1 .ne. s2 .and. h(n-1) .ne. h(n) ) then
+            umu0p(lc,n) = ( h(n-1) - h(n) ) / ( s2 - s1 )
+          else
+            if ( n .gt. 1 ) then
+              umu0p(lc,n) = umu0p(lc,n-1)
+            else 
+              umu0p(lc,n) = umu0
+            end if
+          endif
+!          print*, acos(umu0)*90.0/asin(1.), lc,n,
+!     &            acos(umu0p(lc,n))*90./asin(1.), s2-s1
+          s1 = s2
+   40   continue
+
+
+        
+   30 continue
+
+
+      end
+
+
+
+
+
+
+
+
 
 c ******************************************************************
 c ********** end of DISORT service routines ************************
@@ -6656,12 +7364,13 @@ c ******************************************************************
 c ********** IBCND=1 special case routines *************************
 c ******************************************************************
 
+c ---------------------------------------------------------------------
       SUBROUTINE ALBTRN( ALBEDO, AMB, APB, ARRAY, B, BDR, CBAND, CC,
      &                   CMU, CWT, DTAUCP, EVAL, EVECC, GL, GC, GU,
      &                   IPVT, KK, LL, NLYR, NN, NSTR, NUMU, PRNT,
      &                   TAUCPR, UMU, U0U, WK, YLMC, YLMU, Z, AAD,
-     &                   EVALD, EVECCD, WKD, MI, MI9M2, MAXUMU,
-     &                   MXCMU, MXUMU, NNLYRI, SQT, ALBMED, TRNMED )
+     &                   EVALD, EVECCD, WKD, MAXUMU,
+     &                   MXCMU, MXUMU, SQT, ALBMED, TRNMED )
 
 c    DISORT special case to get only albedo and transmissivity
 c    of entire medium as a function of incident beam angle
@@ -6669,7 +7378,7 @@ c    (many simplifications because boundary condition is just
 c    isotropic illumination, there are no thermal sources, and
 c    particular solutions do not need to be computed).  See
 c    Ref. S2 and references therein for details.
-
+c
 c    The basic idea is as follows.  The reciprocity principle leads to
 c    the following relationships for a plane-parallel, vertically
 c    inhomogeneous medium lacking thermal (or other internal) sources:
@@ -6686,21 +7395,21 @@ c       albedo(theta) = albedo for beam incidence at angle theta
 c       trans(theta) = transmissivity for beam incidence at angle theta
 c       u_0(theta) = upward azim-avg intensity at top boundary
 c                    at angle theta
-
-
-c   O U T P U T    V A R I A B L E S:
+c
+c
+c    O U T P U T   V A R I A B L E S:
 c
 c       ALBMED(IU)   Albedo of the medium as a function of incident
 c                    beam angle cosine UMU(IU)
 c
 c       TRNMED(IU)   Transmissivity of the medium as a function of
 c                    incident beam angle cosine UMU(IU)
-
-
+c
+c
 c    I N T E R N A L   V A R I A B L E S:
-
+c
 c       NCD         number of diagonals below/above main diagonal
-
+c
 c       RCOND       estimate of the reciprocal condition of matrix
 c                   CBAND; for system  CBAND*X = B, relative
 c                   perturbations in CBAND and B of size epsilon may
@@ -6709,17 +7418,17 @@ c                   epsilon/RCOND.  If RCOND is so small that
 c                          1.0 + RCOND .EQ. 1.0
 c                   is true, then CBAND may be singular to working
 c                   precision.
-
+c
 c       CBAND       Left-hand side matrix of linear system Eq. SC(5),
 c                   scaled by Eq. SC(12); in banded form required
 c                   by LINPACK solution routines
-
+c
 c       NCOL        number of columns in CBAND matrix
-
+c
 c       IPVT        INTEGER vector of pivot indices
-
+c
 c       (most others documented in DISORT)
-
+c
 c   Called by- DISORT
 c   Calls- LEPOLY, ZEROIT, SGBCO, SOLEIG, TERPEV, SETMTX, SOLVE1,
 c          ALTRIN, SPALTR, PRALTR
@@ -6727,7 +7436,7 @@ c +-------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
-      INTEGER   MAXUMU, MI, MI9M2, MXCMU, MXUMU, NLYR, NN, NNLYRI,
+      INTEGER   MAXUMU, MXCMU, MXUMU, NLYR, NN, 
      &          NSTR, NUMU
       REAL      ALBEDO
 c     ..
@@ -6735,18 +7444,18 @@ c     .. Array Arguments ..
 
       LOGICAL   PRNT( * )
       INTEGER   IPVT( * )
-      REAL      ALBMED( MAXUMU ), AMB( MI, MI ), APB( MI, MI ),
-     &          ARRAY( MXCMU, MXCMU ), B( NNLYRI ), BDR( MI, 0:MI ),
-     &          CBAND( MI9M2, NNLYRI ), CC( MXCMU, MXCMU ),
-     &          CMU( MXCMU ), CWT( MXCMU ), DTAUCP( * ), EVAL( MI ),
-     &          EVECC( MXCMU, MXCMU ), GC( MXCMU, MXCMU, * ),
-     &          GL( 0:MXCMU, * ), GU( MXUMU, MXCMU, * ), KK( MXCMU, * ),
+      REAL      ALBMED( MAXUMU ), AMB( NN, NN ), APB( NN, NN ),
+     &          ARRAY( NSTR, NSTR ), B( NSTR*NLYR ), BDR( NN, 0:NN ),
+     &          CBAND(9*NN-2,NLYR*NSTR ), CC(NSTR, NSTR ),
+     &          CMU( MXCMU ), CWT( MXCMU ), DTAUCP( * ), EVAL( NN ),
+     &          EVECC(NSTR,NSTR ), GC( MXCMU, MXCMU, * ),
+     &          GL( 0:NSTR, * ), GU( MXUMU, MXCMU, * ), KK( MXCMU, * ),
      &          LL( MXCMU, * ), SQT( * ), TAUCPR( 0:* ),
      &          TRNMED( MAXUMU ), U0U( MXUMU, * ), UMU( MAXUMU ),
      &          WK( MXCMU ), YLMC( 0:MXCMU, MXCMU ), YLMU( 0:MXCMU, * ),
-     &          Z( NNLYRI )
+     &          Z(NSTR*NLYR )
 
-      DOUBLE PRECISION AAD( MI, MI ), EVALD( MI ), EVECCD( MI, MI ),
+      DOUBLE PRECISION AAD( NN, NN ), EVALD( NN ), EVECCD( NN, NN ),
      &                 WKD( MXCMU )
 c     ..
 c     .. Local Scalars ..
@@ -6800,8 +7509,7 @@ c                                  ** (ALBEDO is used only in analytic
 c                                  ** formulae involving ALBEDO = 0
 c                                  ** solutions; Eqs 16-17 of Ref S2)
 
-      CALL ZEROIT( BDR, MI*( MI+1 ) )
-
+      CALL ZEROIT( BDR, NN*( NN+1 ) )
 
 c ===================  BEGIN LOOP ON COMPUTATIONAL LAYERS  =============
 
@@ -6810,7 +7518,7 @@ c ===================  BEGIN LOOP ON COMPUTATIONAL LAYERS  =============
 c                                       ** Solve eigenfunction problem
 c                                       ** in Eq. STWJ(8b), STWL(23f)
 
-         CALL SOLEIG( AMB, APB, ARRAY, CMU, CWT, GL( 0,LC ), MI, MAZIM,
+         CALL SOLEIG( AMB, APB, ARRAY, CMU, CWT, GL( 0,LC ), MAZIM,
      &                MXCMU, NN, NSTR, YLMC, CC, EVECC, EVAL,
      &                KK( 1,LC ), GC( 1,1,LC ), AAD, EVECCD, EVALD,
      &                WKD )
@@ -6831,13 +7539,13 @@ c                      ** conditions (in band-storage mode required by
 c                      ** LINPACK routines)
 
       CALL SETMTX( BDR, CBAND, CMU, CWT, DELM0, DTAUCP, GC, KK,
-     &             LAMBER, LYRCUT, MI, MI9M2, MXCMU, NCOL, NCUT,
-     &             NNLYRI, NN, NSTR, TAUCPR, WK )
+     &             LAMBER, LYRCUT, MXCMU, NCOL, NCUT,
+     &             NLYR, NN, NSTR, TAUCPR, WK )
 
 c                      ** LU-decompose the coeff. matrix (LINPACK)
 
       NCD  = 3*NN - 1
-      CALL SGBCO( CBAND, MI9M2, NCOL, NCD, NCD, IPVT, RCOND, Z )
+      CALL SGBCO( CBAND, 9*NN-2, NCOL, NCD, NCD, IPVT, RCOND, Z )
       IF( 1.0+RCOND .EQ. 1.0 )
      &    CALL ERRMSG('ALBTRN--SGBCO says matrix near singular',.FALSE.)
 
@@ -6847,8 +7555,8 @@ c                             ** one layer, this will give us everything
 c                             ** Solve for constants of integration in
 c                             ** homogeneous solution
 
-      CALL SOLVE1( B, CBAND, FISOT, 1, IPVT, LL, MI9M2, MXCMU,
-     &             NCOL, NLYR, NN, NNLYRI, NSTR )
+      CALL SOLVE1( B, CBAND, FISOT, 1, IPVT, LL, MXCMU,
+     &             NCOL, NLYR, NN, NLYR, NSTR )
 
 c                             ** Compute azimuthally-averaged intensity
 c                             ** at user angles; gives albedo if multi-
@@ -6883,8 +7591,8 @@ c                               ** to positive UMU instead of negative
 c                             ** Second, illuminate from bottom
 c                             ** (if multiple layers)
 
-         CALL SOLVE1( B, CBAND, FISOT, 2, IPVT, LL, MI9M2, MXCMU,
-     &                NCOL, NLYR, NN, NNLYRI, NSTR )
+         CALL SOLVE1( B, CBAND, FISOT, 2, IPVT, LL, MXCMU,
+     &                NCOL, NLYR, NN, NLYR, NSTR )
 
          CALL ALTRIN( GU, KK, LL, MXCMU, MXUMU, MAXUMU, NLYR, NN, NSTR,
      &                NUMU, TAUCPR, UMU, U0U, WK )
@@ -6937,7 +7645,9 @@ c                          ** agree with ordering in ALBMED, TRNMED
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE ALTRIN( GU, KK, LL, MXCMU, MXUMU, MAXUMU, NLYR, NN,
      &                   NSTR, NUMU, TAUCPR, UMU, U0U, WK )
 
@@ -7104,7 +7814,9 @@ c                                        ** KK is positive
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE PRALTR( UMU, NUMU, ALBMED, TRNMED )
 
 c        Print planar albedo and transmissivity of medium
@@ -7149,9 +7861,11 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-      SUBROUTINE SOLVE1( B, CBAND, FISOT, IHOM, IPVT, LL, MI9M2, MXCMU,
-     &                   NCOL, NCUT, NN, NNLYRI, NSTR )
+c ---------------------------------------------------------------------
+      SUBROUTINE SOLVE1( B, CBAND, FISOT, IHOM, IPVT, LL, MXCMU,
+     &                   NCOL, NCUT, NN, NLYR, NSTR )
 
 c        Construct right-hand side vector B for isotropic incidence
 c        (only) on either top or bottom boundary and solve system
@@ -7195,13 +7909,13 @@ c +-------------------------------------------------------------------+
 
 c     .. Scalar Arguments ..
 
-      INTEGER   IHOM, MI9M2, MXCMU, NCOL, NCUT, NN, NNLYRI, NSTR
+      INTEGER   IHOM, MXCMU, NCOL, NCUT, NN, NLYR, NSTR
       REAL      FISOT
 c     ..
 c     .. Array Arguments ..
 
-      INTEGER   IPVT( NNLYRI )
-      REAL      B( NNLYRI ), CBAND( MI9M2, NNLYRI ), LL( MXCMU, * )
+      INTEGER   IPVT(NSTR*NLYR )
+      REAL      B(NSTR*NLYR),CBAND(9*NN-2, NLYR*NSTR), LL( MXCMU, * )
 c     ..
 c     .. Local Scalars ..
 
@@ -7213,7 +7927,7 @@ c     .. External Subroutines ..
 c     ..
 
 
-      CALL ZEROIT( B, NNLYRI )
+      CALL ZEROIT( B, NSTR*NLYR  )
 
       IF( IHOM.EQ.1 ) THEN
 c                             ** Because there are no beam or emission
@@ -7234,7 +7948,7 @@ c                             ** sources, remainder of B array is zero
 
 
       NCD  = 3*NN - 1
-      CALL SGBSL( CBAND, MI9M2, NCOL, NCD, NCD, IPVT, B, 0 )
+      CALL SGBSL( CBAND, 9*NN-2, NCOL, NCD, NCD, IPVT, B, 0 )
 
       DO 40 LC = 1, NCUT
 
@@ -7250,7 +7964,9 @@ c                             ** sources, remainder of B array is zero
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+c ---------------------------------------------------------------------
       SUBROUTINE SPALTR( CMU, CWT, GC, KK, LL, MXCMU, NLYR, NN, NSTR,
      &                   TAUCPR, SFLUP, SFLDN )
 
@@ -7359,6 +8075,7 @@ c     ..
 
       RETURN
       END
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 c ******************************************************************
 c ********** End of IBCND=1 special case routines ******************

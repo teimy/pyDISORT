@@ -6,7 +6,7 @@ Module '_disort' is auto-generated with f2py (version:2).
 """
 from .__version__ import __version__
 
-import _disort
+from . import _disort
 
 ##########################################################################################################
 #

@@ -1,3 +1,7 @@
+c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+c $Rev: 42 $ $Date: 2014-11-07 12:42:45 -0500 (Fri, 07 Nov 2014) $
+c ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 c ---------------------------------------------------------------------
 c  Fortran-90 versions of machine-constant routines R1MACH, D1MACH, I1MACH
 c
@@ -29,7 +33,6 @@ c
 c http://www.nsc.liu.se/~boein/ifip/kyoto/workshop-info/proceedings/einarsson
 c    /d1mach.html  (THIS WEB SITE WORKED AS OF APR 2000)
 c -------------------------------------------------------------------------
-
 
       REAL FUNCTION R1MACH (I)
 c
@@ -92,8 +95,9 @@ c --------------------------------------------------------------------
 
       RETURN
       END FUNCTION R1MACH
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-
+c ---------------------------------------------------------------------
       DOUBLE PRECISION FUNCTION D1MACH (I)
 c
 c   D1MACH can be used to obtain machine-dependent parameters for
@@ -155,8 +159,9 @@ c --------------------------------------------------------------------
 
       RETURN
       END FUNCTION D1MACH
+c - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-
+c ---------------------------------------------------------------------
       INTEGER FUNCTION I1MACH (I)
 c
 c   I1MACH can be used to obtain machine-dependent parameters for the
@@ -262,4 +267,3 @@ c --------------------------------------------------------------------
 
       RETURN
       END FUNCTION I1MACH
-

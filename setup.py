@@ -139,7 +139,7 @@ def build_ext(name=None, dir=None, cppflags='', f77flags='', f90flags='',
         if os.system(F2pyCommand) > 0:
             print('+++ Compilation failed')
             sys.exit()
-        os.system('mv -f _%s.so lib/disort' % name)
+        os.system('mv -f _*.so lib/disort')
         # os.system('rm -f _%s.pyf' % name)
 
 # Build all extensions
