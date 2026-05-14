@@ -7,8 +7,9 @@ import os
 import sys
 import glob
 import string
-from numpy.distutils.core import setup
-from numpy.distutils import fcompiler
+#from numpy.distutils.core import setup
+#from numpy.distutils import fcompiler
+from setuptools import setup
 from distutils.dep_util import newer
 
 from numpy import f2py
@@ -34,7 +35,7 @@ Extensions = [
     ]
 
 # figure out which compiler we're goint to use
-compiler = fcompiler.get_default_fcompiler(requiref90=True)
+#compiler = fcompiler.get_default_fcompiler(requiref90=True)
 compiler = 'gnu95'  # ensure gfortran
 for i in range(len(sys.argv)):
     if '--fcompiler' in sys.argv[i]:
@@ -88,7 +89,7 @@ def buildNeeded(target,src):
     target = os.path.join('lib/disort',target)
     if not os.path.exists(target):
         return True
-    for file in src:
+    for file in src:setup
         if newer(file,target):
             return True
     print('Extension %s is up to date' % os.path.basename(target))
