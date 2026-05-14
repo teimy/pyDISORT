@@ -120,9 +120,9 @@ def build_ext(name=None, dir=None, cppflags='', f77flags='', f90flags='',
         F2pyCommand.append('%s -c ' % f2py_bin)
         F2pyCommand.append('--fcompiler=%s' % compiler)
         F2pyCommand.append('-I%s' % dir)
-        F2pyCommand.append('-I%s' % os.path.join(dir,'include'))
+        #F2pyCommand.append('-I%s' % os.path.join(dir,'include'))
         F2pyCommand.append('-I%s' % os.path.join(dir,'src'))
-        F2pyCommand.append('-I%s' % os.path.join(dir,'src','include'))
+        #F2pyCommand.append('-I%s' % os.path.join(dir,'src','include'))
         if incdir is not '':
             for i in incdir:
                 F2pyCommand.append('-I%s' % i)
