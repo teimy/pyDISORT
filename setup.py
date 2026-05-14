@@ -90,7 +90,7 @@ def buildNeeded(target,src):
     if not os.path.exists(target):
         return True
     for file in src:setup
-        if newer(file,target):
+        if newer(file, target):
             return True
     print('Extension %s is up to date' % os.path.basename(target))
     return False
