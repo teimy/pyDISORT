@@ -98,6 +98,7 @@ def buildNeeded(target,src):
 def build_ext(name=None, dir=None, cppflags='', f77flags='', f90flags='',
               lib='', libdir='', incdir=''):
     # Builds an extension
+    dir = os.path.abspath(dir)
     src = getSources(dir)
     target = '_%s.so' % name
     driver = glob.glob(os.path.join(dir,'Driver.f'))[0]
