@@ -89,7 +89,7 @@ def buildNeeded(target,src):
     target = os.path.join('lib/disort',target)
     if not os.path.exists(target):
         return True
-    for file in src:setup
+    for file in src:
         if newer(file, target):
             return True
     print('Extension %s is up to date' % os.path.basename(target))
