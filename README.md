@@ -7,9 +7,11 @@ Python wrapper to the DISORT 4.0.99¹ radiative transfer solver.
     transfer in multiple scattering and emitting layered media,
     Appl Opt 27 (1988) (12), pp. 2502–2509.
 
-## Prerequisites
-  
-You will need both anaconda3 and gfortran.
+## Requirements
+
+- Python with `numpy`, `scipy`, `f2py` (i.e. `anaconda` package)
+- `gfortran`: `sudo apt-get install gfortran`/`brew install gcc`
+- `meson` and `ninja` for `f2py`: `conda install meson ninja`
   
 ## Installation
 
